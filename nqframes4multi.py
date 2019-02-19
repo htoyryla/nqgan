@@ -33,7 +33,7 @@ parser.add_argument('--output', default='frames', type=str, help='output directo
 
 opt = parser.parse_args()
 opt.debug = False
-opt.nolin = True
+#opt.nolin = True
 print(opt)
 
 str_ids = opt.gpu_ids.split(',')
@@ -59,6 +59,10 @@ modeldir = outdir = os.path.join('runs',opt.name,'model')
 outdir = os.path.join('runs',opt.name,opt.output)
 print(outdir)
 
+try:
+    os.makedirs(outdir)
+except OSError:
+    pass
 
 #---------------generate images
 def generate_img(model):
