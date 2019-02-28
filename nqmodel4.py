@@ -165,7 +165,7 @@ class _netG(nn.Module):
               else:
                 layers = [("deconv"+str(index), nn.ConvTranspose2d(self.ngf*multin, self.ngf*multout, 6, 2, 2, 0, bias=bias))]
             
-            if (norm_layer != PixelNormalization):
+            if (norm_layer not in [PixelNormalization, None]):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
             layers.append(("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)))
@@ -180,12 +180,16 @@ class _netG(nn.Module):
             return layers
  
         if self.nolin:
-            if (norm_layer != PixelNormalization):
+            if (norm_layer is None):
+                layers2 = [("inrelu", nn.ReLU(True))]
+            elif (norm_layer != PixelNormalization):
                 layers2 = [("innorm", norm_layer(self.ngf * 8)),
                            ("inrelu", nn.ReLU(True))]
             else:
                 layers2 = [("inrelu", nn.ReLU(True)),
                            ("innorm", norm_layer(self.ngf * 8))]
+
+
 
             #if opt.upsample:
             #  layers = [("in-upsample", nn.Upsample(scale_factor=2, mode='bilinear')),

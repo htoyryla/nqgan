@@ -80,6 +80,7 @@ parser.add_argument('--lsgan', action='store_true', help='use lsgan')
 parser.add_argument('--rsgan', action='store_true', help='use rsgan')
 parser.add_argument('--instance', action='store_true', help='use instance norm')
 parser.add_argument('--batchnorm', action='store_true', help='use batch norm')
+parser.add_argument('--nonorm', action='store_true', help='no norm layer')
 parser.add_argument('--upsample', action='store_true', help='use upsample and conv instead of convtranspose')
 parser.add_argument('--cudnn', action='store_true', help='use cudnn')
 parser.add_argument('--withoutE', action='store_true', help='do not use Encoder Network')
@@ -91,6 +92,7 @@ parser.add_argument('--nostrict', action='store_true', help='allow partial loadi
 #parser.add_argument('--freeze', action='store_true', help='freeze already trained layers')
 parser.add_argument('--noise', type=float, default=0.0, help='input noise, default=0.')
 parser.add_argument('--flip', action='store_true', help='random horizontal flip')
+parser.add_argument('--crop', action='store_true', help='crop into square')
 parser.add_argument('--trainE', default="Z", help='how encoder is used')
 parser.add_argument('--init', default="default", help='default | dcgan')
 parser.add_argument('--nolin', action='store_true', help='use some linear layers in models')
@@ -174,21 +176,20 @@ else:
     opt.dsmean = (0.5, 0.5, 0.5)
     opt.dsstd = (0.5, 0.5, 0.5)
 
+transf = []
+if opt.crop: # resize smaller side and then crop to center
+    transf.append(transforms.Resize(opt.imageSize))
+    transf.append(transforms.CenterCrop(opt.imageSize))
+else: # force into square
+    transf.append(transforms.Resize((opt.imageSize, opt.imageSize)))
+
 if opt.flip:
-    xform =transforms.Compose([
-                          transforms.Resize(opt.imageSize),
-                          transforms.CenterCrop(opt.imageSize),
-                          transforms.RandomHorizontalFlip(),
-                          transforms.ToTensor(),
-                          transforms.Normalize(opt.dsmean, opt.dsstd)
-                          ])
-else:
-    xform =transforms.Compose([
-                          transforms.Resize(opt.imageSize),
-                          transforms.CenterCrop(opt.imageSize),
-                          transforms.ToTensor(),
-                          transforms.Normalize(opt.dsmean, opt.dsstd)
-                          ])
+    transf.append(transforms.RandomHorizontalFlip())
+
+transf.append(transforms.ToTensor())
+transf.append(transforms.Normalize(opt.dsmean, opt.dsstd))
+
+xform =transforms.Compose(transf)
 
 if opt.dataset in ['imagenet', 'folder', 'lfw']:
     dataset = dset.ImageFolder(root=opt.dataroot, transform=xform)              
@@ -237,6 +238,10 @@ if opt.instance:
         netG.apply(weights_init)
 elif opt.batchnorm:
     netG = _netG(ngpu, norm_layer=nn.BatchNorm2d, opt=opt)
+    if opt.init == "dcgan":
+        netG.apply(weights_init)
+elif opt.nonorm:
+    netG = _netG(ngpu, norm_layer=None, opt=opt)
     if opt.init == "dcgan":
         netG.apply(weights_init)
 else:
