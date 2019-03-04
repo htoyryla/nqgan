@@ -75,7 +75,7 @@ Higher number of channels uses more memory but also can produce higher quality
 
 ### Saving
 
-Models will be saved at runs/<name>/model . Use --save_every to specify how ofter you want to save.
+Models will be saved at runs/name/model . Use --save_every to specify how ofter you want to save.
 
 ### Other functionality
 
@@ -85,7 +85,7 @@ By default, cudnn is disabled in this version. Use --cudnn to enable.
 
 ## How to use a trained model to generate images
 
-There are several programs for using a trained model to generate images. For this to work, you need to have a saved model in runs/<name>/model and you need to know the options used in training. If in doubt about the options, look at the runs/<name>/cmd.txt file to see the command used for training.   
+There are several programs for using a trained model to generate images. For this to work, you need to have a saved model in runs/name/model and you need to know the options used in training. If in doubt about the options, look at the runs/name/cmd.txt file to see the command used for training.   
 
 ### Generate simple frames from a single iteration (aka epoch)
 
@@ -95,11 +95,11 @@ python nqframes4.py  --name nqtest --imageSize 512 --batchSize 4  --ndf 128 --ho
 
 Name identifies the experiment you want to use, imageSize and any model architecture settings must match those used in training. The same does not apply to batchSize, you can even use 1 here to save memory. The only thing to note is that when using batch normalization in generator, results may be poor if a very small batch size is used here.
 
-Which_epoch identifies which of the saved models you want to use. Have a look at the saved samples in runs/<name>/visual to select an iteration which you like. You might want to double check that you actually have a saved model from that iteration in runs/<name>/model (unless you saved at every iteration using --save_every 1).
+Which_epoch identifies which of the saved models you want to use. Have a look at the saved samples in runs/name/visual to select an iteration which you like. You might want to double check that you actually have a saved model from that iteration in runs/name/model (unless you saved at every iteration using --save_every 1).
 
 howMany gives simply the number of images to be generated. Using steps higher than one will additionally generate morphs between images using the given number of steps. Thus, the total number of images generated will be howMany * steps.
 
-You will find the images generated in runs/<name>/frames
+You will find the images generated in runs/name/frames
 
 
 
