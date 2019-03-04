@@ -51,6 +51,7 @@ parser.add_argument('--dataset', default='folder', required=True, help=' folder 
 parser.add_argument('--dataroot', required=True, help='path to dataset')
 parser.add_argument('--dsmeta', default="", help='path to dataset metadata')
 parser.add_argument('--workers', type=int, default=8, help='number of data loading workers')
+
 parser.add_argument('--batchSize', type=int, default=64, help='input batch size')
 parser.add_argument('--imageSize', type=int, default=64, help='the height / width of the input image to network')
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
@@ -85,11 +86,9 @@ parser.add_argument('--upsample', action='store_true', help='use upsample and co
 parser.add_argument('--cudnn', action='store_true', help='use cudnn')
 parser.add_argument('--withoutE', action='store_true', help='do not use Encoder Network')
 parser.add_argument('--debug', action='store_true', help='show debug info')
-#parser.add_argument('--hsv', action='store_true', help='use hsv color space')
 parser.add_argument('--weight_decay', type=float, default=0, help='L2 regularization weight. Greatly helps convergence but leads to artifacts in images, not recommended.')
 parser.add_argument('--nlabels', action='store_true', help='use noisy labels')
 parser.add_argument('--nostrict', action='store_true', help='allow partial loading of pretrained nets')
-#parser.add_argument('--freeze', action='store_true', help='freeze already trained layers')
 parser.add_argument('--noise', type=float, default=0.0, help='input noise, default=0.')
 parser.add_argument('--flip', action='store_true', help='random horizontal flip')
 parser.add_argument('--crop', action='store_true', help='crop into square')
@@ -106,7 +105,6 @@ parser.add_argument('--medianout', type=int, default=0, help='')
 parser.add_argument('--minibatchstd', action='store_true', help='use minibatch std in D')
 parser.add_argument('--saveGextra', action='store_true', help='save G always when saving sample images')
 
-#parser.add_argument('--viz', type=int, default=0, help='visualize grads every n epochs')
 
 raw_args = " ".join(sys.argv)
 print(raw_args)
@@ -444,8 +442,7 @@ for epoch in range(opt.niter):
         if opt.cuda:
             real_cpu = real_cpu.cuda()
         inputv = input_.resize_as_(real_cpu).copy_(real_cpu)
-        #inputv = input_ #.requires_grad()
-
+        
         outputr = netD(inputv.detach())                 # get D(x) for real images
         errD_real = Dcriterion(outputr, True)  # get err ref to real
         errD_real.backward()                   # get D_real gradients
@@ -454,7 +451,7 @@ for epoch in range(opt.niter):
 
         # now D with fake images
         noise.resize_(batch_size, nz, 1, 1).normal_(0, 1) # make random z
-        noisev = noise.detach() #Variable(noise)
+        noisev = noise.detach() 
         fake_z = netG(noisev.detach()) 		          # G(z), why detach?
 
         output = netD(fake_z.detach())                    # D(G(z))
@@ -490,11 +487,11 @@ for epoch in range(opt.niter):
             fake_e = netG(embedding.detach())                              # new fake = G(E(x)), detach from E, train E later
             dist = l1_loss(inputv.detach(), fake_e)*lmbd                   # get err between input and G(E(x))
     
-            errG = criterion(output, True)                                 # get D(G(fake_z)) err
+            errGadv = criterion(output, True)                                 # get D(G(fake_z)) err
             if opt.rsgan:
-                errG = errG - criterion(outputr.detach(), True)            # decrease prob that real seen as real !!!  
+                errGadv = errGadv - criterion(outputr.detach(), True)            # decrease prob that real seen as real !!!  
 
-            errG = errG + dist
+            errG = errGadv + dist				  # add adversarial and AE loss
             if opt.tvloss: 
                 tvl = tvloss(fake_z)                              # tv loss on G(E(x))
                 errG = errG + tvl
@@ -509,7 +506,7 @@ for epoch in range(opt.niter):
                 errG = errG + tvl
             dist = 0
 
-        errG.backward(retain_graph = (not opt.withoutE))                    # get G gradients
+        errG.backward(retain_graph = (not opt.withoutE))   # get G gradients, need to retain graph if encoder is used
         D_G_z2 = output.data.mean() 
         # DGz1 is taken before D update and DGz2 after
         optimizerG.step()                        # update G parameters
@@ -539,24 +536,16 @@ for epoch in range(opt.niter):
                 #errE = l1_loss(noisev.detach(), z_enc)                                
             errE.backward()
             optimizerE.step()
-            optimizerG.step()  
+            optimizerG.step()  # should we really update G here too or not?
+            
 
-
-
-            print('[%d/%d][%d/%d] Loss_D: %.2f Loss_G: %.2f  Loss_E: %.2f D(x): %.2f Dist: %.2f TVLoss: %.2f D(G(z)): %.2f / %.2f Ez stat %.2f / %.2f'
+            print('[%d/%d][%d/%d] Loss_D: %.2f Loss_G: %.2f / %.2f  Loss_E: %.2f D(x): %.2f D(G(z)): %.2f / %.2f Dist: %.2f TVLoss: %.2f Ez stat %.2f / %.2f'
               % (epoch, opt.niter, i, len(dataloader),
-                 errD.data, errG.data, errE.data, D_x, dist, tvl, D_G_z1, D_G_z2, embZstat[0], embZstat[1]))
+                 errD.data, errG.data, errGadv.data, errE.data, D_x, D_G_z1, D_G_z2,  dist, tvl, embZstat[0], embZstat[1]))
         else:
             print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.4f D(G(z)): %.4f / %.4f TVLss: %4f'
                     % (epoch, opt.niter, i, len(dataloader),
                     errD.data, errG.data, D_x, D_G_z1, D_G_z2, tvl))
-      
-        #del errD
-        #del noisev
-        #del inputv
-        #del errG
-        #del output
-        #del outputr
         
  
         # save single samples if opt.imgStep > 0 

@@ -20,6 +20,7 @@ parser.add_argument('--nc', type=int, default=3)
 parser.add_argument('--nolin', action='store_true', help='use some linear layers in models')
 parser.add_argument('--instance', action='store_true', help='use instance norm')
 parser.add_argument('--batchnorm', action='store_true', help='use batch norm')
+parser.add_argument('--nonorm', action='store_true', help='no norm layer')
 parser.add_argument('--upsample', action='store_true', help='use upsample and conv instead of convtranspose')
 parser.add_argument('--howMany', default=100, type=int, help='how many transitions')
 parser.add_argument('--steps', default=20, type=int, help='interpolation steps')
@@ -123,6 +124,8 @@ if opt.instance:
     netG = _netG(norm_layer=nn.InstanceNorm2d, opt=opt)
 elif opt.batchnorm:
     netG = _netG(norm_layer=nn.BatchNorm2d, opt=opt)
+elif opt.nonorm:
+    netG = _netG(ngpu, norm_layer=None, opt=opt)
 else:
     netG = _netG(opt=opt)
 print(netG)
