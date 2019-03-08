@@ -49,6 +49,8 @@ Often weights can grow unbalanced, so that some parts of a model dominate. This 
 niter: how many iterations to run (one iteration traverses the whole dataset once, so usually with a small dataset you need a larger niter)
 step: decrease learning rate after <step> iterations (normal practice in training neural networks)
 gamma: a multiplier used to reduce learning rate, 1 means no reduction, 0.9 means 10% reduction, 0.5 50% reduction.
+flip: training images are randomly flipped horizontally (so as to introduce more variety)
+noise: add noise to training images, give st dev as parameter e.g. --noise 0.01
 ```
 
 ### Model architecture
@@ -68,7 +70,8 @@ These can be changed
 --nolin use a fully convolutional generator
 --upsample use upsample and convolution instead of transposed convolution in generator
 --ngf 128 adjust the number of channels in generator
---ndf 128 adjust the number of channels in discriminator 
+--ndf 128 adjust the number of channels in discriminator
+--nc 1 use one channel input (black and white) instead of 3 (color)
 ```
 
 Higher number of channels uses more memory but also can produce higher quality
@@ -77,6 +80,20 @@ Higher number of channels uses more memory but also can produce higher quality
 
 Models will be saved at runs/name/model . Use --save_every to specify how ofter you want to save.
 
+### Continue training
+```
+Use --netG path_to_saved_generator and --netD path_to_saved_discriminator to load pretrained
+models instead of training from scratch. It is recommended to use a new name for the experiment, as in
+
+--name test001 --netD runs/test000/model/netD_epoch_100.pth -netG runs/test000/model/netG_epoch_100.pth
+
+
+Note that the model architecture parameters for the new should match
+those used in the original training. Otherwise various errors are likely to occur.
+They can be ignored though using --nostrict, then models will be initialized randomly
+and then matching parts of the models copied, this can be used in special cases if 
+you know what you are doing :)
+```
 ### Other functionality
 
 Nqgan has additional functionality not yet documented here. For instance one can add an encoder so that generator will be trained both according to the feedback from discriminator and according to how well the images are reproduced by the encoder-generator chain (as in an autoencoder).
