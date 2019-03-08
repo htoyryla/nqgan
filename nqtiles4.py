@@ -8,7 +8,8 @@ from nqmodel4 import _netG
 from random import random
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--name', default='baseline', type=str, help='trained model name')
+parser.add_argument('--runroot', default='./runs', help='path to dataset')
+parser.add_argument('--name', required=True, help='project name')
 parser.add_argument('--which_epoch', default='24', type=str, help='0,1,2,3,4...')
 parser.add_argument('--batchSize', default=32, type=int, help='batchsize')
 parser.add_argument('--gpu_ids',default='0', type=str,help='gpu_ids: e.g. 0  0,1,2  0,2')
@@ -57,8 +58,9 @@ for mid in str_median:
         median_ids.append(mid)
 opt.median_ids = median_ids
 
-modeldir = outdir = os.path.join('./runs',opt.name,'model')
-outdir = os.path.join('./runs',opt.name, opt.output)
+rundir = os.path.join(opt.runroot,opt.name)
+modeldir = outdir = os.path.join(rundir,'model')
+outdir = os.path.join(rundir,opt.output)
 print(outdir)
 
 try:

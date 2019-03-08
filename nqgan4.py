@@ -47,6 +47,7 @@ import torch.nn.functional as F
 
 # merged various things into a new start hxgan
 parser = argparse.ArgumentParser()
+parser.add_argument('--runroot', default='./runs', help='path to where the project folders are stored')
 parser.add_argument('--dataset', default='folder', required=True, help=' folder | fake')
 parser.add_argument('--dataroot', required=True, help='path to dataset')
 parser.add_argument('--dsmeta', default="", help='path to dataset metadata')
@@ -134,7 +135,7 @@ print(opt)
 
 from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
-rundir = os.path.join('./runs/',opt.name)
+rundir = os.path.join(opt.runroot,opt.name)
 
 try:
     os.makedirs(rundir)

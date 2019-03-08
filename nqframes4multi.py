@@ -7,7 +7,8 @@ from torch.autograd import Variable
 from nqmodel4 import _netG
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--name', default='baseline', type=str, help='trained model name')
+parser.add_argument('--runroot', default='./runs', help='path to dataset')
+parser.add_argument('--name', required=True, help='project name')
 parser.add_argument('--which_epoch', default='24', type=str, help='0,1,2,3,4...')
 parser.add_argument('--end_epoch', default='24', type=str, help='0,1,2,3,4...')
 parser.add_argument('--step_epoch', default='24', type=str, help='0,1,2,3,4...')
@@ -56,8 +57,9 @@ for mid in str_median:
         median_ids.append(mid)
 opt.median_ids = median_ids
 
-modeldir = outdir = os.path.join('runs',opt.name,'model')
-outdir = os.path.join('runs',opt.name,opt.output)
+rundir = os.path.join(opt.runroot,opt.name)
+modeldir = outdir = os.path.join(rundir,'model')
+outdir = os.path.join(rundir,opt.output)
 print(outdir)
 
 try:
@@ -110,7 +112,7 @@ for epoch in epochs:
     netG = _netG(norm_layer=nn.InstanceNorm2d, opt=opt)
   elif opt.batchnorm:
     netG = _netG(norm_layer=nn.BatchNorm2d, opt=opt)
-elif opt.nonorm:
+  elif opt.nonorm:
     netG = _netG(ngpu, norm_layer=None, opt=opt)
   else:
     netG = _netG(opt=opt)

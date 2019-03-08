@@ -7,7 +7,7 @@ import json
 
 
 dataset_root = 'datasets/'
-dataset_name = 'hf2019'
+dataset_name = 'o512'
 
 dataset = datasets.ImageFolder(dataset_root+dataset_name, transform=transforms.Compose([transforms.Resize((256, 256)),
                              transforms.ToTensor()]))
