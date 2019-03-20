@@ -255,6 +255,7 @@ class _netD(nn.Module):
         self.nz = opt.nz
         self.nc = opt.nc
         self.ndf = opt.ndf
+        self.D2 = opt.D2 is not None 
         if opt.Dsize == 0:
             self.size = opt.imageSize
         else:
@@ -273,9 +274,15 @@ class _netD(nn.Module):
         multin = 1
 
         def downsample_level(index, multin, multout, normL, bias):
-            layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
-                      ("norm"+str(index), normL(self.ndf * multout)),
-                      ("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)) ]
+            if opt.D2:
+                layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
+                          ("convb"+str(index), nn.Conv2d(self.ndf*multout, self.ndf*multout, 3, 1, 1, bias=self.use_bias)),
+                          ("norm"+str(index), normL(self.ndf * multout)),
+                          ("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)) ]
+            else:
+                layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
+                          ("norm"+str(index), normL(self.ndf * multout)),
+                          ("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)) ]
             return layers
 
         layers = [
