@@ -141,6 +141,9 @@ class _netG(nn.Module):
         else:
             self.use_bias = norm_layer == nn.InstanceNorm2d
 
+        if opt.x2:
+            self.size = int(self.size/2) 
+
         if opt.nolin:
             upsample_steps = int(round(math.log(self.size, 2))) - 1
         else:
@@ -220,8 +223,13 @@ class _netG(nn.Module):
             index = i + 1
             upsampleL.extend(upsample_level(i+1, multin, multout, norm_layer, self.use_bias))
             multin = multout
-        
+
+        if opt.x2:
+            upsampleL.extend(upsample_level(i + 2, multin, multin, norm_layer, self.use_bias))        
+
         layers.extend(upsampleL)
+
+
 
         final = [
             #("outconv", nn.ConvTranspose2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
@@ -267,6 +275,10 @@ class _netD(nn.Module):
             self.use_bias = norm_layer==nn.InstanceNorm2d
             
         print("defining _netD")
+
+        if opt.x2:
+            self.size = int(self.size/2) 
+
         downsample_steps = int(round(math.log(self.size, 2))) - 3
         n512 = downsample_steps - 3
         dnsampleL = []
@@ -283,12 +295,29 @@ class _netD(nn.Module):
                 layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
                           ("norm"+str(index), normL(self.ndf * multout)),
                           ("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)) ]
+
+            if index in opt.dmedian_ids and opt.dmedian > 0:
+                median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.dmedian, stride=1, same=True)) 
+                layers.insert(0, median_layer)
+
             return layers
 
-        layers = [
-            ("inconv", nn.Conv2d(self.nc, self.ndf*multin, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
-            ("inrelu", nn.LeakyReLU(0.2, inplace=True))]
+        if opt.x2:
+            layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ("inrelu", nn.LeakyReLU(0.2, inplace=True)),
+                      ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
+                      ("norm0", norm_layer(self.ndf)),
+                      ("relu0", nn.LeakyReLU(0.2, inplace=True)),
+                                           ]
+        else:
+            layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ("inrelu", nn.LeakyReLU(0.2, inplace=True))]
 
+        if opt.dmedianin > 0:
+                median_layer = ("medianin", MedianPool2d(kernel_size=opt.dmedianin, stride=1, same=True)) 
+                layers.insert(0, median_layer)
+
+        print(layers)
         print(self.size, downsample_steps, n512)  
         for i in range(0, downsample_steps):
             inputSize = int(inputSize / 2) 
@@ -317,6 +346,7 @@ class _netD(nn.Module):
         layers.extend(final)
         if use_sigmoid:
             layers += [("outactiv", nn.Sigmoid())]
+        #print(layers)
         self.main = nn.Sequential(OrderedDict(layers))
 
     def forward(self, input):

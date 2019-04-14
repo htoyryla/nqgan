@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torchvision
 from torch.autograd import Variable
-from nqmodel4 import _netG
+from nqdmodel4 import _netG
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runroot', default='./runs', help='path to dataset')
@@ -31,6 +31,7 @@ parser.add_argument('--medianindex', type=str, default="", help='')
 parser.add_argument('--medianout', type=int, default=0, help='')
 parser.add_argument('--suffix', type=str, default="", help='')
 parser.add_argument('--output', default='frames', type=str, help='output directory')
+parser.add_argument('--x2', action='store_true', help='use additional layer for double size')
 
 
 opt = parser.parse_args()

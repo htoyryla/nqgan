@@ -103,9 +103,15 @@ parser.add_argument('--Dsize', type=float, default=0, help='image size for discr
 parser.add_argument('--flip_labels', action='store_true', help='flip real and fake labels')
 parser.add_argument('--median', type=int, default=0, help='median layer kernel, set 0 for no median filter')
 parser.add_argument('--medianindex', type=str, default="", help='')
+parser.add_argument('--dmedian', type=int, default=0, help='median layer kernel, set 0 for no median filter')
+parser.add_argument('--dmedianindex', type=str, default="", help='')
 parser.add_argument('--medianout', type=int, default=0, help='')
+parser.add_argument('--dmedianin', type=int, default=0, help='')
 parser.add_argument('--minibatchstd', action='store_true', help='use minibatch std in D')
 parser.add_argument('--saveGextra', action='store_true', help='save G always when saving sample images')
+parser.add_argument('--x2', action='store_true', help='use additional layer for double size')
+parser.add_argument('--reallabel', type=float, default=1.0, help='')
+parser.add_argument('--fakelabel', type=float, default=0.0, help='')
 
 
 raw_args = " ".join(sys.argv)
@@ -129,12 +135,21 @@ for mid in str_median:
         median_ids.append(mid)
 opt.median_ids = median_ids
 
+str_dmedian = opt.dmedianindex.split(',')
+dmedian_ids = []
+for mid in str_dmedian:
+    if (mid == ""): continue
+    mid = int(mid)
+    if mid>=0:
+        dmedian_ids.append(mid)
+opt.dmedian_ids = dmedian_ids
+
 if opt.save_everyD < 0:
     opt.save_everyD = opt.save_every
 
 print(opt)
 
-from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from nqdmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -311,8 +326,8 @@ if not opt.withoutE:
     print(netE)
 
 if not opt.flip_labels:
-  real_label = 1.0
-  fake_label = 0.0
+  real_label = opt.reallabel
+  fake_label = opt.fakelabel
 else:
   real_label = 0.0
   fake_label = 1.0
