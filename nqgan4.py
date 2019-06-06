@@ -112,6 +112,8 @@ parser.add_argument('--saveGextra', action='store_true', help='save G always whe
 parser.add_argument('--x2', action='store_true', help='use additional layer for double size')
 parser.add_argument('--reallabel', type=float, default=1.0, help='')
 parser.add_argument('--fakelabel', type=float, default=0.0, help='')
+parser.add_argument('--freezeD', type=str, default="", help='freeze given layers in D')
+parser.add_argument('--freezeG', type=str, default="", help='freeze given layers in G')
 
 
 raw_args = " ".join(sys.argv)
@@ -146,6 +148,14 @@ opt.dmedian_ids = dmedian_ids
 
 if opt.save_everyD < 0:
     opt.save_everyD = opt.save_every
+
+fG_ids = []
+if opt.freezeG != "": 
+  str_freezeG = opt.freezeG.split(',')
+  for fgid in str_freezeG:
+    fgid = int(fgid)
+    if fgid>=0:
+        fG_ids.append(fgid)
 
 print(opt)
 
@@ -340,12 +350,34 @@ if not opt.withoutE:
     if opt.netE != '':
         Epar = torch.load(opt.netE)
         try:
-          netE.load_state_dict(Epar, strict = not opt.nostrict)
+          netE.load_state_dict(Epar, strict = not opt.nostrict)   
         except RuntimeError:
           print("Layer size mismatch during loading") 
 
 
     print(netE)
+
+def getLevel(str):
+    level = -1 
+    if "deconv" in str:
+        level = str.replace("deconv", "")
+    #print(str, level)
+    return int(level)
+
+if len(fG_ids) > 0:
+    #print(fG_ids)
+    for key, mod in netG.main.named_children():
+      level = getLevel(key)
+      if level < 0:
+          continue
+      if level in fG_ids:
+          #if k[0] == "outconv": continue #do not freeze the final output layer
+          layer = "main."+key
+          #print(level, layer)
+          w = layer +".weight"
+          if w in Gpar.keys():	     
+              print("freezing netG."+w)
+              mod.requires_grad = False
 
 if not opt.flip_labels:
   real_label = opt.reallabel
@@ -585,7 +617,7 @@ for epoch in range(opt.niter):
               % (epoch, opt.niter, i, len(dataloader),
                  errD.data, errG.data, errGadv.data, errE.data, D_x, D_G_z1, D_G_z2,  dist, tvl, embZstat[0], embZstat[1]))
         else:
-            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.4f D(G(z)): %.4f / %.4f TVLss: %4f'
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.8f D(G(z)): %.8f / %.8f TVLss: %4f'
                     % (epoch, opt.niter, i, len(dataloader),
                     errD.data, errG.data, D_x, D_G_z1, D_G_z2, tvl))
         
