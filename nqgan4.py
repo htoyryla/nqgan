@@ -155,10 +155,32 @@ rundir = os.path.join(opt.runroot,opt.name)
 
 try:
     os.makedirs(rundir)
+except OSError:
+    pass
+
+try:
     os.makedirs(os.path.join(rundir, 'model'))
+except OSError:
+    pass
+
+try:
     os.makedirs(os.path.join(rundir, 'visual'))
+except OSError:
+    pass
+
+try:
     os.makedirs(os.path.join(rundir, 'frames'))
+except OSError:
+    pass
+
+
+try:
     os.makedirs(os.path.join(rundir, 'results'))
+except OSError:
+    pass
+
+try:
+    os.makedirs(os.path.join(rundir, 'images'))
 except OSError:
     pass
 
@@ -574,9 +596,11 @@ for epoch in range(opt.niter):
             if opt.cuda: sampleNoise = sampleNoise.cuda()
             fakeimg = netG(Variable(sampleNoise))
             fakeimg = fakeimg.data
-            vutils.save_image(fakeimg,
-                './runs/'+opt.name+'images/sample%06d.png' % (int(imgCtr/opt.imgStep)),
-                normalize=True)        
+            for fidx in range(0, opt.batchSize):
+                singleFake = fakeimg[fidx]
+                vutils.save_image(singleFake,
+                    './runs/'+opt.name+'/images/sample%06d-%d.png' % (int(imgCtr/opt.imgStep), fidx),
+                    normalize=True)        
 
         imgCtr = imgCtr + 1
 
