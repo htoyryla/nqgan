@@ -52,6 +52,18 @@ gamma: a multiplier used to reduce learning rate, 1 means no reduction, 0.9 mean
 flip: training images are randomly flipped horizontally (so as to introduce more variety)
 noise: add noise to training images, give st dev as parameter e.g. --noise 0.01
 ```
+### Use cyclical learning rate
+
+Cyclical learning rate can work better than the usual gradually decreasing rate.
+
+Use for example 
+'''
+--lrD 0.0002 --lrG 0.0002 --cyclr 100
+'''
+
+to vary lr cyclically between 0.0002 and 0.000002.
+
+I have also noticed that use of cyclical lr may reduce memory usage.
 
 ### Model architecture
 
