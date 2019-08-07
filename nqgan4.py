@@ -69,6 +69,7 @@ parser.add_argument('--imgStep', type=int, default=0, help='minibatches between 
 parser.add_argument('--lrG', type=float, default=0.0002, help='learning G rate, default=0.0002')
 parser.add_argument('--lrD', type=float, default=0.00005, help='learning D rate, default=0.0002')
 parser.add_argument('--lrE', type=float, default=0.0002, help='learning E rate, default=0.0002')
+parser.add_argument('--cyclr', type=float, default=-1, help='')
 parser.add_argument('--step', type=int, default=40, help='lr step, default=40')
 parser.add_argument('--gamma', type=float, default=0.1, help='gamma, default=0.1')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
@@ -159,7 +160,7 @@ if opt.freezeG != "":
 
 print(opt)
 
-from nqdmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -222,6 +223,12 @@ if opt.dsmeta:
 else:
     opt.dsmean = (0.5, 0.5, 0.5)
     opt.dsstd = (0.5, 0.5, 0.5)
+
+if opt.cyclr > 0:
+    opt.lrDmin = opt.lrD/opt.cyclr
+    opt.lrGmin = opt.lrG/opt.cyclr
+    opt.lrEmin = opt.lrE/opt.cyclr
+
 
 transf = []
 if opt.crop: # resize smaller side and then crop to center
@@ -460,17 +467,30 @@ if opt.cuda:
 fixed_noise = Variable(fixed_noise)
 
 # setup optimizer
-optimizerD = optim.Adam(netD.parameters(), lr=opt.lrD, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
-optimizerG = optim.Adam(netG.parameters(), lr=opt.lrG, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
-if not opt.withoutE:
-    optimizerE = optim.Adam(netE.parameters(), lr=opt.lrE, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
+if opt.cyclr < 0:
+    optimizerD = optim.Adam(netD.parameters(), lr=opt.lrD, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
+    optimizerG = optim.Adam(netG.parameters(), lr=opt.lrG, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
+    if not opt.withoutE:
+        optimizerE = optim.Adam(netE.parameters(), lr=opt.lrE, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
+else:
+    optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
+    optimizerG = optim.RMSprop(netG.parameters(), lr=opt.lrG, weight_decay=opt.weight_decay)
+    if not opt.withoutE:
+        optimizerE = optim.RMSprop(netE.parameters(), lr=opt.lrE, weight_decay=opt.weight_decay)
 
 
 schedulers = []
-schedulers.append(lr_scheduler.StepLR(optimizerD, step_size=opt.step, gamma=opt.gamma))
-schedulers.append(lr_scheduler.StepLR(optimizerG, step_size=opt.step, gamma=opt.gamma))
-if not opt.withoutE:
-    schedulers.append(lr_scheduler.StepLR(optimizerE, step_size=opt.step, gamma=opt.gamma))
+if opt.cyclr < 0:
+    schedulers.append(lr_scheduler.StepLR(optimizerD, step_size=opt.step, gamma=opt.gamma))
+    schedulers.append(lr_scheduler.StepLR(optimizerG, step_size=opt.step, gamma=opt.gamma))
+    if not opt.withoutE:
+        schedulers.append(lr_scheduler.StepLR(optimizerE, step_size=opt.step, gamma=opt.gamma))
+else:
+    schedulers.append(lr_scheduler.CyclicLR(optimizerD, opt.lrDmin, opt.lrD, cycle_momentum=False, gamma=opt.gamma))
+    schedulers.append(lr_scheduler.CyclicLR(optimizerG, opt.lrGmin, opt.lrG, cycle_momentum=False, gamma=opt.gamma))
+    if not opt.withoutE:
+        schedulers.append(lr_scheduler.CyclicLR(optimizerE, opt.lrEmin, opt.lrE, cycle_momentum=False, gamma=opt.gamma))
+
 
 def clampWeights(m):
     if type(m) != nn.BatchNorm2d and type(m) != nn.Sequential:
@@ -660,6 +680,11 @@ for epoch in range(opt.niter):
             if opt.saveGextra:
                 torch.save(netG.state_dict(), './runs/%s/model/netG_epoch_%d_%d.pth' % (opt.name, epoch, saveCtr))
                 saveCtr = saveCtr + 1
+        
+        if opt.cyclr > 0:
+            for scheduler in  schedulers:
+                scheduler.step()
+
 
     # do checkpointing
     if epoch % opt.save_every == 0:
@@ -674,5 +699,6 @@ for epoch in range(opt.niter):
 
 
     #step lrRate
-    for scheduler in  schedulers:
-        scheduler.step()
+    if opt.cyclr <= 0:
+        for scheduler in  schedulers:
+            scheduler.step()
