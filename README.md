@@ -18,7 +18,7 @@ python nqgan4.py --dataroot datasets/flowers/ --dataset folder --name test001 --
 ```
 Options used:
 ```
-dataset:  path to your dataset
+dataroot:  path to your dataset
 name:     name you want to use for this experiment, files will be places in runs/<name>
 imageSize: your choice from 64, 128, 256, 512, 1024, larger size will require more memory, adjust if you run out of memory
 batchSize: with smaller image size you can use larger batch size to speed up training, with 512px you can try batch size of 8 as a starting point; adjust if you run out of memory
