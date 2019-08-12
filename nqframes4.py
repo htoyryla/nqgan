@@ -22,7 +22,7 @@ parser.add_argument('--instance', action='store_true', help='use instance norm')
 parser.add_argument('--batchnorm', action='store_true', help='use batch norm')
 parser.add_argument('--nonorm', action='store_true', help='no norm layer')
 parser.add_argument('--upsample', action='store_true', help='use upsample and conv instead of convtranspose')
-
+parser.add_argument('--x2', action='store_true', help='use additional layer for double size')
 
 parser.add_argument('--howMany', default=100, type=int, help='how many transitions')
 parser.add_argument('--steps', default=20, type=int, help='interpolation steps')
