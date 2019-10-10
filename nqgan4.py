@@ -104,6 +104,7 @@ parser.add_argument('--Dsize', type=float, default=0, help='image size for discr
 parser.add_argument('--flip_labels', action='store_true', help='flip real and fake labels')
 parser.add_argument('--median', type=int, default=0, help='median layer kernel, set 0 for no median filter')
 parser.add_argument('--medianindex', type=str, default="", help='')
+parser.add_argument('--medianstride', type=int, default=1, help='')
 parser.add_argument('--dmedian', type=int, default=0, help='median layer kernel, set 0 for no median filter')
 parser.add_argument('--dmedianindex', type=str, default="", help='')
 parser.add_argument('--medianout', type=int, default=0, help='')
@@ -115,6 +116,20 @@ parser.add_argument('--reallabel', type=float, default=1.0, help='')
 parser.add_argument('--fakelabel', type=float, default=0.0, help='')
 parser.add_argument('--freezeD', type=str, default="", help='freeze given layers in D')
 parser.add_argument('--freezeG', type=str, default="", help='freeze given layers in G')
+parser.add_argument('--blur', type=int, default=0, help='initial blur, use 0 for no blur')
+parser.add_argument('--blurstep', type=int, default=4, help='number of epochs until stepping down blur')
+parser.add_argument('--blurdelta', type=int, default=2, help='how much blur is decreased at each step')
+parser.add_argument('--blurnoise', type=float, default=0.0, help='noise to be added after blur, default=0.')
+parser.add_argument('--blurmode', type=str, default="blur", help='blur mode blur/alt')
+parser.add_argument('--fixednoise', action='store_true', help='use fixed noise when saving sample images')
+#parser.add_argument('--laplacian', type=int, default= 0, help='laplacian kernel size, 0 for no laplacian filter')
+parser.add_argument('--dropout', type=float, default=0, help='dropout prob for selected layers in D')
+parser.add_argument('--dropoutindex', type=str, default="", help='D layers to add dropout')
+parser.add_argument('--brightness', type=float, default=0, help='modify dataset brightness')
+parser.add_argument('--contrast', type=float, default=0, help='modify dataset contrast')
+parser.add_argument('--saturation', type=float, default=0, help='modify dataset saturation')
+parser.add_argument('--drandom', action='store_true', help='random dataset modification')
+
 
 
 raw_args = " ".join(sys.argv)
@@ -147,6 +162,16 @@ for mid in str_dmedian:
         dmedian_ids.append(mid)
 opt.dmedian_ids = dmedian_ids
 
+str_dropout = opt.dropoutindex.split(',')
+dropout_ids = []
+for mid in str_dropout:
+    if (mid == ""): continue
+    mid = int(mid)
+    if mid>=0:
+        dropout_ids.append(mid)
+opt.dropout_ids = dropout_ids
+
+
 if opt.save_everyD < 0:
     opt.save_everyD = opt.save_every
 
@@ -159,6 +184,11 @@ if opt.freezeG != "":
         fG_ids.append(fgid)
 
 print(opt)
+
+if opt.blur > 0:
+    import kornia
+    blurKernel = opt.blur
+    #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
 from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
@@ -239,6 +269,17 @@ else: # force into square
 
 if opt.flip:
     transf.append(transforms.RandomHorizontalFlip())
+
+if opt.brightness > 0 or opt.contrast > 0 or opt.saturation > 0:
+    if opt.drandom:
+        transf.append(transforms.ColorJitter(brightness=opt.brightness, contrast=opt.contrast, saturation=opt.saturation))
+    else:
+        br = (opt.brightness, opt.brightness) if opt.brightness > 0 else 0
+        cr = (opt.contrast, opt.contrast) if opt.contrast > 0 else 0
+        st = (opt.saturation, opt.saturation) if opt.saturation > 0 else 0
+        transf.append(transforms.ColorJitter(brightness=br, contrast=cr, saturation=st))
+
+
 
 transf.append(transforms.ToTensor())
 transf.append(transforms.Normalize(opt.dsmean, opt.dsstd))
@@ -407,6 +448,8 @@ class GANLoss(nn.Module):
         self.noisy = noisy
         if use_lsgan:
             self.loss = nn.MSELoss()
+        #elif opt.ssim:
+        #    self.loss = kornia.SSIM(5)
         else:
             self.loss = nn.BCELoss()
 
@@ -507,6 +550,8 @@ def resize2d(img, size):
 
 
 imgCtr = 0
+blurCtr = opt.blurstep
+blurState = True
 for epoch in range(opt.niter):
     saveCtr = 0
     # get a batch of input images
@@ -528,6 +573,25 @@ for epoch in range(opt.niter):
         else:
           real_cpu, _ = data    
 
+        #if opt.brightness != 1:
+        #    real_cpu = transforms.functional.adjust_brightness(real_cpu, opt.brightness)
+        #if opt.contrast != 1:
+        #    real_cpu = transforms.functional.adjust_contrast(real_cpu, opt.contrast)
+        #if opt.dgamma != 1:
+        #    real_cpu = transforms.functional.adjust_gamma(real_cpu, opt.dgamma)
+
+
+        #if blurKernel > 0:            
+        #    blur = kornia.filters.BoxBlur((blurKernel, blurKernel))
+        #    blurred = torch.zeros_like(real_cpu)
+        #    n = 0
+        #    for im in real_cpu:
+        #        #print(n, blurKernel)
+        #        blurred[n] = blur(im.unsqueeze(0)).squeeze()
+        #        n = n + 1
+        #    real_cpu = blurred
+
+
         # update netD 
 
         # first with real images
@@ -537,6 +601,17 @@ for epoch in range(opt.niter):
             real_cpu = real_cpu.cuda()
         inputv = input_.resize_as_(real_cpu).copy_(real_cpu)
         
+        if opt.blur > 0 and blurKernel > 0 and blurState:            
+            blur = kornia.filters.BoxBlur((blurKernel, blurKernel))
+            inputv = blur(inputv)            
+            
+            if opt.blurnoise > 0:
+                blurnoise = torch.FloatTensor(data[0].size()).normal_(0, opt.blurnoise)
+                if opt.cuda:
+                    blurnoise = blurnoise.cuda()
+                inputv = inputv + blurnoise
+
+        input_samples = inputv.clone()
         outputr = netD(inputv.detach())                 # get D(x) for real images
         errD_real = Dcriterion(outputr, True)  # get err ref to real
         errD_real.backward()                   # get D_real gradients
@@ -644,14 +719,17 @@ for epoch in range(opt.niter):
  
         # save single samples if opt.imgStep > 0 
         if opt.imgStep != 0 and imgCtr % opt.imgStep == 0:
-            sampleNoise = torch.FloatTensor(opt.batchSize, nz, 1, 1).normal_(0, 1)
+            if opt.fixednoise:
+                sampleNoise = fixed_noise.clone() 
+            else:
+                sampleNoise = torch.FloatTensor(opt.batchSize, nz, 1, 1).normal_(0, 1)
             if opt.cuda: sampleNoise = sampleNoise.cuda()
             fakeimg = netG(Variable(sampleNoise))
             fakeimg = fakeimg.data
             for fidx in range(0, opt.batchSize):
                 singleFake = fakeimg[fidx]
                 vutils.save_image(singleFake,
-                    './runs/'+opt.name+'/images/sample%06d-%d.png' % (int(imgCtr/opt.imgStep), fidx),
+                    opt.runroot+'/'+opt.name+'/images/sample%06d-%d.png' % (int(imgCtr/opt.imgStep), fidx),
                     normalize=True)        
 
         imgCtr = imgCtr + 1
@@ -660,7 +738,10 @@ for epoch in range(opt.niter):
         if i % 100 == 0:
  
             vutils.save_image(iimgs,
-                    './runs/%s/visual/real_samples.png' % opt.name,
+                    opt.runroot+'/%s/visual/real_samples.png' % opt.name,
+                    normalize=True)
+            vutils.save_image(input_samples,
+                    opt.runroot+'/%s/visual/input_samples.png' % opt.name,
                     normalize=True)
             fake = netG(fixed_noise)
             fake = fake.data
@@ -675,10 +756,10 @@ for epoch in range(opt.niter):
 
             #print('saving fakes ', fake.min(), fake.mean(), fake.std(), fake.max())
             vutils.save_image(fake,
-                    './runs/%s/visual/fake_samples_epoch_%03d.png' % (opt.name, epoch),
+                    opt.runroot+'/%s/visual/fake_samples_epoch_%03d.png' % (opt.name, epoch),
                     normalize=True)
             if opt.saveGextra:
-                torch.save(netG.state_dict(), './runs/%s/model/netG_epoch_%d_%d.pth' % (opt.name, epoch, saveCtr))
+                torch.save(netG.state_dict(), opt.runroot+'/%s/model/netG_epoch_%d_%d.pth' % (opt.name, epoch, saveCtr))
                 saveCtr = saveCtr + 1
         
         if opt.cyclr > 0:
@@ -688,17 +769,28 @@ for epoch in range(opt.niter):
 
     # do checkpointing
     if epoch % opt.save_every == 0:
-        torch.save(netG.state_dict(), './runs/%s/model/netG_epoch_%d.pth' % (opt.name, epoch))
+        torch.save(netG.state_dict(), opt.runroot+'/%s/model/netG_epoch_%d.pth' % (opt.name, epoch))
         #torch.save(netD.state_dict(), './runs/%s/model/netD_epoch_%d.pth' % (opt.name, epoch))
         if not opt.withoutE:
-            torch.save(netE.state_dict(), './runs/%s/model/netE_epoch_%d.pth' % (opt.name, epoch))
+            torch.save(netE.state_dict(), opt.runroot+'/%s/model/netE_epoch_%d.pth' % (opt.name, epoch))
 
     if epoch % opt.save_everyD == 0:
-        #torch.save(netG.state_dict(), './runs/%s/model/netG_epoch_%d.pth' % (opt.name, epoch))
-        torch.save(netD.state_dict(), './runs/%s/model/netD_epoch_%d.pth' % (opt.name, epoch))
+        #torch.save(netG.state_dict(), opt.runroot+'/%s/model/netG_epoch_%d.pth' % (opt.name, epoch))
+        torch.save(netD.state_dict(), opt.runroot+'/%s/model/netD_epoch_%d.pth' % (opt.name, epoch))
 
 
     #step lrRate
     if opt.cyclr <= 0:
         for scheduler in  schedulers:
             scheduler.step()
+
+    if opt.blur > 0 and opt.blurmode == "alt":
+        blurState = not blurState
+        print("blur set to "+str(blurState))
+
+    blurCtr = blurCtr - 1
+    if (opt.blur > 0) and (blurCtr <= 0) and (blurKernel > 0):
+        blurCtr = opt.blurstep
+        blurKernel = blurKernel - opt.blurdelta 
+        if blurKernel <= 0:
+            blurKernel = 0    

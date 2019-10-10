@@ -177,8 +177,14 @@ class _netG(nn.Module):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
             if index in opt.median_ids and opt.median > 0:
-                median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.median, stride=1, same=True)) 
+                median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.median, stride=opt.medianstride, same=True)) 
                 layers.insert(0, median_layer)
+                if opt.medianstride > 1:
+                    resize_layer = ("medianresize"+str(index), nn.Upsample(scale_factor=opt.medianstride, mode='nearest'))
+                    layers.insert(1, resize_layer)
+
+            #if (opt.dropout >0) and index in opt.dropout_ids:
+            #    layers.append(("dropout"+str(index), nn.Dropout2d(opt.dropout))) 
 
             return layers
  
@@ -299,6 +305,9 @@ class _netD(nn.Module):
             if index in opt.dmedian_ids and opt.dmedian > 0:
                 median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.dmedian, stride=1, same=True)) 
                 layers.insert(0, median_layer)
+
+            if (opt.dropout >0) and index in opt.dropout_ids:
+                layers.append(("dropout"+str(index), nn.Dropout2d(opt.dropout))) 
 
             return layers
 
