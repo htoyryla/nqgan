@@ -198,7 +198,7 @@ if opt.blur > 0:
     blurKernel = opt.blur
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from nqmodel4t import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
