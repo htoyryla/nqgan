@@ -80,13 +80,18 @@ parser.add_argument('--name', default='baseline', help='folder to output images 
 parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('--gpu_ids', default='0', type=str, help='gpu_ids: e.g. 0 0,1,2 0,2')
 parser.add_argument('--lsgan', action='store_true', help='use lsgan')
+parser.add_argument('--hgan', action='store_true', help='use hgan style discriminator')
+parser.add_argument('--hgan2', action='store_true', help='use hgan style 2 discriminator')
 parser.add_argument('--rsgan', action='store_true', help='use rsgan')
 parser.add_argument('--D2', action='store_true', help='use additional convlayers in D')
 parser.add_argument('--instance', action='store_true', help='use instance norm')
 parser.add_argument('--batchnorm', action='store_true', help='use batch norm')
 parser.add_argument('--nonorm', action='store_true', help='no norm layer')
 parser.add_argument('--upsample', action='store_true', help='use upsample and conv instead of convtranspose')
+parser.add_argument('--upsample_after', type=int, default=1000, help='use upsample on top layers')
 parser.add_argument('--cudnn', action='store_true', help='use cudnn')
+parser.add_argument('--benchmark', action='store_true', help='use cudnn')
+parser.add_argument('--determ', action='store_true', help='use cudnn')
 parser.add_argument('--withoutE', action='store_true', help='do not use Encoder Network')
 parser.add_argument('--debug', action='store_true', help='show debug info')
 parser.add_argument('--weight_decay', type=float, default=0, help='L2 regularization weight. Greatly helps convergence but leads to artifacts in images, not recommended.')
@@ -112,6 +117,7 @@ parser.add_argument('--dmedianin', type=int, default=0, help='')
 parser.add_argument('--minibatchstd', action='store_true', help='use minibatch std in D')
 parser.add_argument('--saveGextra', action='store_true', help='save G always when saving sample images')
 parser.add_argument('--x2', action='store_true', help='use additional layer for double size')
+parser.add_argument('--x4', action='store_true', help='use two additional layers for 4x size')
 parser.add_argument('--reallabel', type=float, default=1.0, help='')
 parser.add_argument('--fakelabel', type=float, default=0.0, help='')
 parser.add_argument('--freezeD', type=str, default="", help='freeze given layers in D')
@@ -129,7 +135,9 @@ parser.add_argument('--brightness', type=float, default=0, help='modify dataset 
 parser.add_argument('--contrast', type=float, default=0, help='modify dataset contrast')
 parser.add_argument('--saturation', type=float, default=0, help='modify dataset saturation')
 parser.add_argument('--drandom', action='store_true', help='random dataset modification')
-
+parser.add_argument('--orthoD', action='store_true', help='orthogonal D weights')
+parser.add_argument('--orthoG', action='store_true', help='orthogonal G weights')
+parser.add_argument('--hardtanh', action='store_true', help='use hardtang in G')
 
 
 raw_args = " ".join(sys.argv)
@@ -190,7 +198,7 @@ if opt.blur > 0:
     blurKernel = opt.blur
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4t import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -241,7 +249,8 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(opt.manualSeed)
     torch.cuda.set_device(gpu_ids[0])
 
-    cudnn.benchmark = False #opt.cudnn #True
+    cudnn.benchmark = opt.benchmark
+    cudnn.deterministic = opt.determ
     cudnn.enabled = opt.cudnn
 
 if opt.dsmeta:
@@ -303,7 +312,7 @@ nef = int(opt.nef)
 nc = 3
 lmbd = opt.lmbd
 
-assert(opt.imageSize in [64,128,256,512,1024])
+assert(opt.imageSize in [64,128,256,512,1024, 2048])
 
 
 def bw2rgb(im, out=True):
@@ -347,6 +356,11 @@ else:
     if opt.init == "dcgan":
         netG.apply(weights_init)
 
+if opt.orthoG:
+    for m in netG.modules():
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+            nn.init.orthogonal(m.weight)
+
 # load prelearned weights if any
 
 if opt.netG != '':
@@ -368,6 +382,11 @@ else:
     netD = _netD(ngpu, use_sigmoid=(not opt.lsgan), opt=opt)
     if opt.init == "dcgan":
         netD.apply(weights_init)
+        
+if opt.orthoD:
+    for m in netD.modules():
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+            nn.init.orthogonal(m.weight)        
 
 # load prelearned weights if any
 
@@ -630,6 +649,30 @@ for epoch in range(opt.niter):
         D_G_z1 = output.data.mean()
 
         errD = errD_real + errD_fake                      # total D err display
+        
+        olD = 0
+        if opt.orthoD:
+            #with torch.enable_grad():
+            reg = 1e-6 #.cuda()
+            orth_loss = torch.zeros(1).cuda()
+            for name, param in netD.named_parameters():
+                #print('netD', name, param.shape)
+                if 'bias' not in name:
+                    param = param.cuda()
+                    param_flat = param.view(param.shape[0], -1) #.cuda()
+                    #if param_flat.shape[0] < 2:
+                    #    continue
+                    #print(param_flat)
+                    sym = torch.mm(param_flat, torch.t(param_flat)) #cuda()
+                    #print(sym)
+                    #print(param_flat.shape[0])
+                    symd = torch.eye(param_flat.shape[0]).cuda()
+                    #print(symd)
+                    sym -= symd
+                    orth_loss = orth_loss + (reg * sym.abs().sum())
+            orth_loss.backward()
+            olD = orth_loss.cpu().detach().numpy()
+            
         optimizerD.step()                                 # update D weights
       
         if opt.clipD > 0:
@@ -675,12 +718,32 @@ for epoch in range(opt.niter):
                 errG = errG + tvl
             dist = 0
 
+        olG = 0
+        if opt.orthoG:
+                #with torch.enable_grad():
+                reg = 1e-6
+                orth_loss = torch.zeros(1).cuda()
+                for name, param in netG.named_parameters():
+                    #print('netG', name, param.shape)
+                    if 'bias' not in name:
+                        param = param.cuda()
+                        param_flat = param.view(param.shape[0], -1).cuda()
+                        #print(param_flat)
+                        #if param_flat.shape[0] < 2:
+                        #    continue
+                        sym = torch.mm(param_flat, torch.t(param_flat))
+                        symd = torch.eye(param_flat.shape[0]).cuda()
+                        #print(sym, symd)
+                        sym = sym - symd
+                        orth_loss = orth_loss + (reg * sym.abs().sum())
+                    orth_loss.backward(retain_graph = True)
+                    olG = orth_loss.cpu().detach().numpy()
+                #errG = errG + orth_loss 
+
         errG.backward(retain_graph = (not opt.withoutE))   # get G gradients, need to retain graph if encoder is used
         D_G_z2 = output.data.mean() 
         # DGz1 is taken before D update and DGz2 after
         optimizerG.step()                        # update G parameters
-
-
 
         if opt.clipG > 0:
             netG.apply(clampWeights)
@@ -712,9 +775,9 @@ for epoch in range(opt.niter):
               % (epoch, opt.niter, i, len(dataloader),
                  errD.data, errG.data, errGadv.data, errE.data, D_x, D_G_z1, D_G_z2,  dist, tvl, embZstat[0], embZstat[1]))
         else:
-            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.8f D(G(z)): %.8f / %.8f TVLss: %4f'
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.8f D(G(z)): %.8f / %.8f ortho D/G: %4f, %4f'
                     % (epoch, opt.niter, i, len(dataloader),
-                    errD.data, errG.data, D_x, D_G_z1, D_G_z2, tvl))
+                    errD.data, errG.data, D_x, D_G_z1, D_G_z2, olD, olG))
         
  
         # save single samples if opt.imgStep > 0 
