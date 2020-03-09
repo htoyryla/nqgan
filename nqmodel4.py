@@ -71,7 +71,7 @@ class BatchStdConcat(nn.Module):
     """
     def __init__(self, groupSize=4):
         super().__init__()
-        self.groupSize=4
+        self.groupSize=groupSize
 
     def forward(self, x):
         shape = list(x.size())                                              # NCHW - Initial size
@@ -143,6 +143,8 @@ class _netG(nn.Module):
 
         if opt.x2:
             self.size = int(self.size/2) 
+        elif opt.x4:
+            self.size = int(self.size/4) 
 
         if opt.nolin:
             upsample_steps = int(round(math.log(self.size, 2))) - 1
@@ -162,12 +164,24 @@ class _netG(nn.Module):
                 layers = [("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
                           ("replpad"+str(index), nn.ReplicationPad2d(1)),
                           ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
-            else:
+
+            elif opt.upsample_after >= 0 and index < opt.upsample_after :
               if index < upsample_steps :
                 layers = [("deconv"+str(index), nn.ConvTranspose2d(self.ngf*multin, self.ngf*multout, 4, 2, 1, 0, bias=bias))]
               else:
                 layers = [("deconv"+str(index), nn.ConvTranspose2d(self.ngf*multin, self.ngf*multout, 6, 2, 2, 0, bias=bias))]
-            
+
+            else:             
+              if index < upsample_steps :
+                layers = [ ("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
+                           ("replpad"+str(index), nn.ReplicationPad2d(1)), 
+                           ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
+              else:
+                layers = [("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
+                          ("replpad"+str(index), nn.ReplicationPad2d(1)),
+                          ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
+
+
             if (norm_layer not in [PixelNormalization, None]):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
@@ -232,15 +246,23 @@ class _netG(nn.Module):
 
         if opt.x2:
             upsampleL.extend(upsample_level(i + 2, multin, multin, norm_layer, self.use_bias))        
+        elif opt.x4:
+            upsampleL.extend(upsample_level(i + 2, multin, multin, norm_layer, self.use_bias))        
+            upsampleL.extend(upsample_level(i + 3, multin, multin, norm_layer, self.use_bias))        
+
 
         layers.extend(upsampleL)
 
-
-
-        final = [
-            #("outconv", nn.ConvTranspose2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
-            ("outconv", nn.Conv2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
-            ("outactiv", nn.Tanh()) ]
+        if opt.hardtanh:
+            final = [
+                #("outconv", nn.ConvTranspose2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
+                ("outconv", nn.Conv2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
+                ("outactiv", nn.Hardtanh()) ]
+        else:
+            final = [
+                #("outconv", nn.ConvTranspose2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
+                ("outconv", nn.Conv2d(self.ngf, self.nc, kernel_size=3, stride=1, padding=1, bias=self.use_bias)),
+                ("outactiv", nn.Tanh()) ]
             
         layers.extend(final)
 
@@ -282,8 +304,13 @@ class _netD(nn.Module):
             
         print("defining _netD")
 
+        start_idx = 0
         if opt.x2:
-            self.size = int(self.size/2) 
+            self.size = int(self.size/2)
+            #start_idx = 1 
+        elif opt.x4:
+            self.size = int(self.size/4)
+            #start_idx = 1 
 
         downsample_steps = int(round(math.log(self.size, 2))) - 3
         n512 = downsample_steps - 3
@@ -316,8 +343,18 @@ class _netD(nn.Module):
                       ("inrelu", nn.LeakyReLU(0.2, inplace=True)),
                       ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
                       ("norm0", norm_layer(self.ndf)),
+                      ("relu0", nn.LeakyReLU(0.2, inplace=True))
+                      ]
+        elif opt.x4:
+            layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ("inrelu", nn.LeakyReLU(0.2, inplace=True)),
+                      ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
+                      ("norm0", norm_layer(self.ndf)),
                       ("relu0", nn.LeakyReLU(0.2, inplace=True)),
-                                           ]
+                      ("conv0b", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
+                      ("norm0b", norm_layer(self.ndf)),
+                      ("relu0b", nn.LeakyReLU(0.2, inplace=True))
+                      ]
         else:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
                       ("inrelu", nn.LeakyReLU(0.2, inplace=True))]
@@ -328,7 +365,7 @@ class _netD(nn.Module):
 
         print(layers)
         print(self.size, downsample_steps, n512)  
-        for i in range(0, downsample_steps):
+        for i in range(start_idx, downsample_steps+start_idx):
             inputSize = int(inputSize / 2) 
             if multin < 8:
                  multout = multin*2
@@ -343,14 +380,21 @@ class _netD(nn.Module):
         layers.extend(dnsampleL)
 
         corr = 0
+        g = 4 if opt.batchSize % 4 == 0 else 1
 
         if opt.minibatchstd:
-            mbstdlayer = [("batchstd", BatchStdConcat())]
+            mbstdlayer = [("batchstd", BatchStdConcat(groupSize=g))]
             layers.extend(mbstdlayer)
             corr = 1
 
-        final = [ ('outconvA', nn.Conv2d(self.ndf*multin + corr, self.ndf*multin + corr, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
-            ('outconvB', nn.Conv2d(self.ndf*multin + corr, 1, kernel_size=4, stride=2, padding=1, bias=self.use_bias))] 
+        if opt.hgan:
+            final = [ ('outconvA', nn.Conv2d(self.ndf*multin + corr, 1, kernel_size=6, stride=4, padding=1, bias=self.use_bias))] #,
+        elif opt.hgan2:
+            final = [ ('outconvA', nn.Conv2d(self.ndf*multin, 1, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ('outconvB', nn.Conv2d(1, 1, kernel_size=4, stride=2, padding=1, bias=self.use_bias))] 
+        else:
+            final = [ ('outconvA', nn.Conv2d(self.ndf*multin + corr, self.ndf*multin + corr, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                ('outconvB', nn.Conv2d(self.ndf*multin + corr, 1, kernel_size=4, stride=2, padding=1, bias=self.use_bias))] 
 
         layers.extend(final)
         if use_sigmoid:
@@ -359,7 +403,7 @@ class _netD(nn.Module):
         self.main = nn.Sequential(OrderedDict(layers))
 
     def forward(self, input):
-        #print(input.size())
+        #print("Din",input.size())
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
         else:
