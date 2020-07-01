@@ -84,6 +84,7 @@ parser.add_argument('--hgan', action='store_true', help='use hgan style discrimi
 parser.add_argument('--hgan2', action='store_true', help='use hgan style 2 discriminator')
 parser.add_argument('--rsgan', action='store_true', help='use rsgan')
 parser.add_argument('--D2', action='store_true', help='use additional convlayers in D')
+parser.add_argument('--elu', action='store_true', help='use ELU')
 parser.add_argument('--instance', action='store_true', help='use instance norm')
 parser.add_argument('--batchnorm', action='store_true', help='use batch norm')
 parser.add_argument('--nonorm', action='store_true', help='no norm layer')
@@ -95,6 +96,7 @@ parser.add_argument('--determ', action='store_true', help='use cudnn')
 parser.add_argument('--withoutE', action='store_true', help='do not use Encoder Network')
 parser.add_argument('--debug', action='store_true', help='show debug info')
 parser.add_argument('--weight_decay', type=float, default=0, help='L2 regularization weight. Greatly helps convergence but leads to artifacts in images, not recommended.')
+parser.add_argument('--l1reg', type=float, default=0, help='L1 regularization weight.')
 parser.add_argument('--nlabels', action='store_true', help='use noisy labels')
 parser.add_argument('--nostrict', action='store_true', help='allow partial loading of pretrained nets')
 parser.add_argument('--noise', type=float, default=0.0, help='input noise, default=0.')
@@ -199,7 +201,7 @@ if opt.blur > 0:
     blurKernel = opt.blur
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4t import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -675,6 +677,17 @@ for epoch in range(opt.niter):
                     orth_loss = orth_loss + (reg * sym.abs().sum())
             orth_loss.backward()
             olD = orth_loss.cpu().detach().numpy()
+
+        l1reg = None
+        if opt.l1reg > 0:
+            for name, param in netD.named_parameters():
+                if l1reg is None:
+                    l1reg = param.norm(1)
+                else:
+                    l1reg = l1reg + param.norm(2)
+            l1reg = opt.l1reg * l1reg
+            l1reg.backward()
+            l1D = l1reg.cpu().detach().numpy()
             
         optimizerD.step()                                 # update D weights
       
@@ -743,6 +756,18 @@ for epoch in range(opt.niter):
                     olG = orth_loss.cpu().detach().numpy()
                 #errG = errG + orth_loss 
 
+        l1reg = None
+        if opt.l1reg > 0:
+            for name, param in netG.named_parameters():
+                if l1reg is None:
+                    l1reg = param.norm(1)
+                else:
+                    l1reg = l1reg + param.norm(2)
+            l1reg = opt.l1reg * l1reg
+            l1reg.backward()
+            l1G = l1reg.cpu().detach().numpy()
+            #errG = errG + opt.l1reg * l1reg
+
         errG.backward(retain_graph = (not opt.withoutE))   # get G gradients, need to retain graph if encoder is used
         D_G_z2 = output.data.mean() 
         # DGz1 is taken before D update and DGz2 after
@@ -778,9 +803,9 @@ for epoch in range(opt.niter):
               % (epoch, opt.niter, i, len(dataloader),
                  errD.data, errG.data, errGadv.data, errE.data, D_x, D_G_z1, D_G_z2,  dist, tvl, embZstat[0], embZstat[1]))
         else:
-            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.8f D(G(z)): %.8f / %.8f ortho D/G: %4f, %4f'
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f  D(x): %.8f D(G(z)): %.8f / %.8f L1 D/G: %4f, %4f'
                     % (epoch, opt.niter, i, len(dataloader),
-                    errD.data, errG.data, D_x, D_G_z1, D_G_z2, olD, olG))
+                    errD.data, errG.data, D_x, D_G_z1, D_G_z2, l1D, l1G))
         
  
         # save single samples if opt.imgStep > 0 

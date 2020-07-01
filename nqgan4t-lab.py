@@ -99,8 +99,7 @@ parser.add_argument('--nlabels', action='store_true', help='use noisy labels')
 parser.add_argument('--nostrict', action='store_true', help='allow partial loading of pretrained nets')
 parser.add_argument('--noise', type=float, default=0.0, help='input noise, default=0.')
 parser.add_argument('--flip', action='store_true', help='random horizontal flip')
-parser.add_argument('--crop', action='store_true', help='center crop into square')
-parser.add_argument('--randomcrop', action='store_true', help='random crop into square')
+parser.add_argument('--crop', action='store_true', help='crop into square')
 parser.add_argument('--trainE', default="Z", help='how encoder is used')
 parser.add_argument('--init', default="default", help='default | dcgan')
 parser.add_argument('--nolin', action='store_true', help='use some linear layers in models')
@@ -139,7 +138,10 @@ parser.add_argument('--drandom', action='store_true', help='random dataset modif
 parser.add_argument('--orthoD', action='store_true', help='orthogonal D weights')
 parser.add_argument('--orthoG', action='store_true', help='orthogonal G weights')
 parser.add_argument('--hardtanh', action='store_true', help='use hardtang in G')
-
+parser.add_argument('--dgauss', type=int, default=0, help='gaussian pooling in discriminator')
+parser.add_argument('--dgauss2', type=int, default=0, help='gaussian pooling in discriminator alt 2')
+parser.add_argument('--dgaussindex', type=str, default="", help='')
+parser.add_argument('--lab', action='store_true', help='use LAB color space')
 
 raw_args = " ".join(sys.argv)
 print(raw_args)
@@ -180,6 +182,15 @@ for mid in str_dropout:
         dropout_ids.append(mid)
 opt.dropout_ids = dropout_ids
 
+str_dgaussindex = opt.dgaussindex.split(',')
+dgauss_ids = []
+for mid in str_dgaussindex:
+    if (mid == ""): continue
+    mid = int(mid)
+    if mid>=0:
+        dgauss_ids.append(mid)
+opt.dgauss_ids = dgauss_ids
+
 
 if opt.save_everyD < 0:
     opt.save_everyD = opt.save_every
@@ -194,12 +205,16 @@ if opt.freezeG != "":
 
 print(opt)
 
+if opt.lab:
+  from labxform import LABxform
+  from skimage.color import lab2rgb
+
 if opt.blur > 0:
     import kornia
     blurKernel = opt.blur
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4t import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -274,8 +289,6 @@ transf = []
 if opt.crop: # resize smaller side and then crop to center
     transf.append(transforms.Resize(opt.imageSize))
     transf.append(transforms.CenterCrop(opt.imageSize))
-elif opt.randomcrop:
-    transf.append(transforms.RandomResizedCrop((opt.imageSize, opt.imageSize)))
 else: # force into square
     transf.append(transforms.Resize((opt.imageSize, opt.imageSize)))
 
@@ -291,10 +304,12 @@ if opt.brightness > 0 or opt.contrast > 0 or opt.saturation > 0:
         st = (opt.saturation, opt.saturation) if opt.saturation > 0 else 0
         transf.append(transforms.ColorJitter(brightness=br, contrast=cr, saturation=st))
 
-
-
 transf.append(transforms.ToTensor())
-transf.append(transforms.Normalize(opt.dsmean, opt.dsstd))
+
+if opt.lab:
+    transf.append(LABxform())
+else:
+    transf.append(transforms.Normalize(opt.dsmean, opt.dsstd))
 
 xform =transforms.Compose(transf)
 
@@ -336,6 +351,16 @@ def rgb2bw(rgb):
     r, g, b = rgb[0,:,:], rgb[1,:,:], rgb[2,:,:]
     gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
     return gray
+
+def deprocLAB(lab):
+   lab = torch.clamp(lab, -1, 1)
+   lab = lab.cpu().numpy().transpose(1,2,0) #* 100
+   im = lab2rgb(lab) #cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+   lab[:,:,0] = (1 + lab[:,:,0]) * 50
+   lab[:,:,1:3] = lab[:,:,1:3] * 128
+   #print(lab[:,:,0].min(), lab[:,:,0].max(), lab[:,:,1].min(), lab[:,:,1].max(), lab[:,:,2].min(), lab[:,:,2].max())
+   im = torch.from_numpy(im.transpose(2,0,1))
+   return im
 
 # create models
 
@@ -578,6 +603,7 @@ for epoch in range(opt.niter):
     saveCtr = 0
     # get a batch of input images
     for i, data in enumerate(dataloader, 0):
+        #print(data.min(), data.max())
         if opt.noise > 0:  # TUTKI TÄMÄ !!!!
             addnoise = torch.FloatTensor(data[0].size()).normal_(0, opt.noise)
             data[0] += addnoise
@@ -594,6 +620,9 @@ for epoch in range(opt.niter):
           real_cpu = data_
         else:
           real_cpu, _ = data    
+
+        #print(real_cpu.min(), real_cpu.max())
+
 
         #if opt.brightness != 1:
         #    real_cpu = transforms.functional.adjust_brightness(real_cpu, opt.brightness)
@@ -794,6 +823,7 @@ for epoch in range(opt.niter):
             fakeimg = fakeimg.data
             for fidx in range(0, opt.batchSize):
                 singleFake = fakeimg[fidx]
+                singleFake = deprocLAB(singleFake)
                 vutils.save_image(singleFake,
                     opt.runroot+'/'+opt.name+'/images/sample%06d-%d.png' % (int(imgCtr/opt.imgStep), fidx),
                     normalize=True)        
@@ -811,12 +841,28 @@ for epoch in range(opt.niter):
                     normalize=True)
             fake = netG(fixed_noise)
             fake = fake.data
+
+            '''
+            for j in range(0,3):
+                print(real_cpu[j,:,:].min().cpu().numpy(),real_cpu[j,:,:].mean().cpu().numpy(),real_cpu[j,:,:].max().cpu().numpy()) 
+                print(fake[j,:,:].min().cpu().numpy(),fake[j,:,:].mean().cpu().numpy(),fake[j,:,:].max().cpu().numpy()) 
+            '''
+
             if opt.nc == 1:
                fake_ = torch.Tensor(fake.size(0), 3, fake.size(2), fake.size(3))
                #print(fake_.shape)
                n = 0
                for im in fake:
                   fake_[n] = bw2rgb(im)
+                  n = n + 1
+               fake = fake_
+
+            if opt.lab:
+               fake_ = torch.Tensor(fake.size(0), 3, fake.size(2), fake.size(3)).cuda()
+               #print(fake_.shape)
+               n = 0
+               for im in fake:
+                  fake_[n] = deprocLAB(im)
                   n = n + 1
                fake = fake_
 
