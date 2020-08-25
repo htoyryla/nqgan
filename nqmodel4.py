@@ -136,6 +136,13 @@ class _netG(nn.Module):
         self.size = opt.imageSize
         self.ngpu = ngpu
         self.nolin = opt.nolin 
+        self.relu = nn.ReLU(inplace=True)
+        if opt.elu:
+            self.relu = nn.ELU(inplace=True)
+        self.activation = nn.LeakyReLU(0.2, inplace=True)
+        if opt.elu:
+            self.activation = nn.ELU(inplace=True)
+
         if type(norm_layer) == functools.partial:
             self.use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
@@ -185,7 +192,7 @@ class _netG(nn.Module):
             if (norm_layer not in [PixelNormalization, None]):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
-            layers.append(("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)))
+            layers.append(("relu"+str(index), self.activation)) #nn.LeakyReLU(0.2, inplace=True)))
 
             if (norm_layer == PixelNormalization):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
@@ -204,12 +211,12 @@ class _netG(nn.Module):
  
         if self.nolin:
             if (norm_layer is None):
-                layers2 = [("inrelu", nn.ReLU(True))]
+                layers2 = [("inrelu", self.activation)]
             elif (norm_layer != PixelNormalization):
                 layers2 = [("innorm", norm_layer(self.ngf * 8)),
-                           ("inrelu", nn.ReLU(True))]
+                           ("inrelu", self.activation)]
             else:
-                layers2 = [("inrelu", nn.ReLU(True)),
+                layers2 = [("inrelu", self.activation),
                            ("innorm", norm_layer(self.ngf * 8))]
 
 
@@ -224,7 +231,7 @@ class _netG(nn.Module):
             
         else:
             layers = [("inlayer", nn.Linear(self.nz, self.ngf*8*4)),
-                     ("inrelu", nn.ReLU(True)),
+                     ("inrelu", self.activation),
                      ("inview", Zview())]
 
         #layers = [("inlayer", nn.Linear(self.nz, self.ngf*8*4)),
@@ -301,7 +308,13 @@ class _netD(nn.Module):
             self.use_bias = norm_layer.func==nn.InstanceNorm2d
         else:
             self.use_bias = norm_layer==nn.InstanceNorm2d
-            
+        self.relu = nn.ReLU(inplace=True)
+        if opt.elu:
+            self.relu = nn.ELU(inplace=True)
+        self.activation = nn.LeakyReLU(0.2, inplace=True)
+        if opt.elu:
+            self.activation = nn.ELU(inplace=True)      
+      
         print("defining _netD")
 
         start_idx = 0
@@ -323,11 +336,11 @@ class _netD(nn.Module):
                 layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
                           ("convb"+str(index), nn.Conv2d(self.ndf*multout, self.ndf*multout, 3, 1, 1, bias=self.use_bias)),
                           ("norm"+str(index), normL(self.ndf * multout)),
-                          ("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)) ]
+                          ("relu"+str(index), self.activation) ]
             else:
                 layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
                           ("norm"+str(index), normL(self.ndf * multout)),
-                          ("relu"+str(index), nn.LeakyReLU(0.2, inplace=True)) ]
+                          ("relu"+str(index), self.activation) ]
 
             if index in opt.dmedian_ids and opt.dmedian > 0:
                 median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.dmedian, stride=1, same=True)) 
@@ -340,24 +353,24 @@ class _netD(nn.Module):
 
         if opt.x2:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
-                      ("inrelu", nn.LeakyReLU(0.2, inplace=True)),
+                      ("inrelu", self.activation),
                       ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
                       ("norm0", norm_layer(self.ndf)),
-                      ("relu0", nn.LeakyReLU(0.2, inplace=True))
+                      ("relu0", self.activation)
                       ]
         elif opt.x4:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
-                      ("inrelu", nn.LeakyReLU(0.2, inplace=True)),
+                      ("inrelu", self.activation),
                       ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
                       ("norm0", norm_layer(self.ndf)),
-                      ("relu0", nn.LeakyReLU(0.2, inplace=True)),
+                      ("relu0", self.activation),
                       ("conv0b", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
                       ("norm0b", norm_layer(self.ndf)),
-                      ("relu0b", nn.LeakyReLU(0.2, inplace=True))
+                      ("relu0b", self.activation)
                       ]
         else:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
-                      ("inrelu", nn.LeakyReLU(0.2, inplace=True))]
+                      ("inrelu", self.activation)]
 
         if opt.dmedianin > 0:
                 median_layer = ("medianin", MedianPool2d(kernel_size=opt.dmedianin, stride=1, same=True)) 
