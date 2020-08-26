@@ -18,6 +18,7 @@ from torch.optim import lr_scheduler
 import numpy as np
 import cv2
 import torch.nn.functional as F
+from DiscriminativeLR import discriminative_lr_params
 
 # gan trainer
 # htoyryla 30 Jul 2018
@@ -142,6 +143,10 @@ parser.add_argument('--drandom', action='store_true', help='random dataset modif
 parser.add_argument('--orthoD', action='store_true', help='orthogonal D weights')
 parser.add_argument('--orthoG', action='store_true', help='orthogonal G weights')
 parser.add_argument('--hardtanh', action='store_true', help='use hardtang in G')
+parser.add_argument('--dlr', type=str, default='', help='use discriminative lr')
+parser.add_argument('--dlrrange', type=int, default=0, help='use discriminative lr')
+parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales for G')
+
 
 
 raw_args = " ".join(sys.argv)
@@ -208,7 +213,7 @@ if opt.blur > 0:
         assert(False, "Unknown blur type")
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from nqmodel4t import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -540,13 +545,36 @@ if opt.cuda:
 
 fixed_noise = Variable(fixed_noise)
 
+if opt.dlr != '' and opt.dlrrange > 0 :
+    paramsG, lr_arrG, _ = discriminative_lr_params(netG, slice(opt.lrG/opt.dlrrange, opt.lrG))
+    paramsD, lr_arrD, _ = discriminative_lr_params(netD, slice(opt.lrD/opt.dlrrange, opt.lrD))
+    if opt.dlrGrev:
+        lr_arrG = lr_arrG[::-1]
+else:
+    paramsG, lr_arrG, _ = discriminative_lr_params(netG, slice(opt.lrG))
+    paramsD, lr_arrD, _ = discriminative_lr_params(netD, slice(opt.lrD))
+
 # setup optimizer
 if opt.cyclr < 0:
     optimizerD = optim.Adam(netD.parameters(), lr=opt.lrD, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
     optimizerG = optim.Adam(netG.parameters(), lr=opt.lrG, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
     if not opt.withoutE:
         optimizerE = optim.Adam(netE.parameters(), lr=opt.lrE, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
-else:
+elif opt.dlr != '':
+    print(lr_arrG)
+    print(lr_arrD)
+
+    if 'D' in opt.dlr:
+        optimizerD = optim.RMSprop(paramsD, lr=opt.lrD, weight_decay=opt.weight_decay)
+    else:
+        optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
+    if 'G' in opt.dlr:
+        optimizerG = optim.RMSprop(paramsG, lr=opt.lrG, weight_decay=opt.weight_decay)
+    else:
+        optimizerG = optim.RMSprop(netG.parameters(), lr=opt.lrG, weight_decay=opt.weight_decay)
+    if not opt.withoutE:
+        optimizerE = optim.RMSprop(netE.parameters(), lr=opt.lrE, weight_decay=opt.weight_decay)
+else:    
     optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
     optimizerG = optim.RMSprop(netG.parameters(), lr=opt.lrG, weight_decay=opt.weight_decay)
     if not opt.withoutE:
@@ -559,6 +587,17 @@ if opt.cyclr < 0:
     schedulers.append(lr_scheduler.StepLR(optimizerG, step_size=opt.step, gamma=opt.gamma))
     if not opt.withoutE:
         schedulers.append(lr_scheduler.StepLR(optimizerE, step_size=opt.step, gamma=opt.gamma))
+elif opt.dlr != '':
+    if 'G' in opt.dlr: 
+        schedulers.append(lr_scheduler.CyclicLR(optimizerG, base_lr=list(lr_arrG/opt.cyclr), max_lr=list(lr_arrG), cycle_momentum=False, gamma=opt.gamma))
+    else:
+        schedulers.append(lr_scheduler.CyclicLR(optimizerG, opt.lrGmin, opt.lrG, cycle_momentum=False, gamma=opt.gamma))
+    if 'D' in opt.dlr:        
+        schedulers.append(lr_scheduler.CyclicLR(optimizerD, base_lr=list(lr_arrD/opt.cyclr), max_lr=list(lr_arrD), cycle_momentum=False, gamma=opt.gamma))
+    else:
+        schedulers.append(lr_scheduler.CyclicLR(optimizerD, opt.lrDmin, opt.lrD, cycle_momentum=False, gamma=opt.gamma))
+    if not opt.withoutE:
+        schedulers.append(lr_scheduler.CyclicLR(optimizerE, opt.lrEmin, opt.lrE, cycle_momentum=False, gamma=opt.gamma))            
 else:
     schedulers.append(lr_scheduler.CyclicLR(optimizerD, opt.lrDmin, opt.lrD, cycle_momentum=False, gamma=opt.gamma))
     schedulers.append(lr_scheduler.CyclicLR(optimizerG, opt.lrGmin, opt.lrG, cycle_momentum=False, gamma=opt.gamma))
