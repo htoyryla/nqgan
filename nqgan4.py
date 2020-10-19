@@ -109,6 +109,7 @@ parser.add_argument('--init', default="default", help='default | dcgan')
 parser.add_argument('--nolin', action='store_true', help='use some linear layers in models')
 parser.add_argument('--clipD', type=float, default=0, help='clip discriminator weights to given value')
 parser.add_argument('--clipG', type=float, default=0, help='clip generator weights to given value')
+parser.add_argument('--clipE', type=float, default=0, help='clip generator weights to given value')
 parser.add_argument('--Dsize', type=float, default=0, help='image size for discriminator for special effects')
 parser.add_argument('--flip_labels', action='store_true', help='flip real and fake labels')
 parser.add_argument('--median', type=int, default=0, help='median layer kernel, set 0 for no median filter')
@@ -146,7 +147,7 @@ parser.add_argument('--hardtanh', action='store_true', help='use hardtang in G')
 parser.add_argument('--dlr', type=str, default='', help='use discriminative lr')
 parser.add_argument('--dlrrange', type=int, default=0, help='use discriminative lr')
 parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales for G')
-
+parser.add_argument('--residual', action='store_true', help='use residual in G')
 
 
 raw_args = " ".join(sys.argv)
@@ -213,7 +214,7 @@ if opt.blur > 0:
         assert(False, "Unknown blur type")
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from rnqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
@@ -605,10 +606,22 @@ else:
         schedulers.append(lr_scheduler.CyclicLR(optimizerE, opt.lrEmin, opt.lrE, cycle_momentum=False, gamma=opt.gamma))
 
 
-def clampWeights(m):
+def clampWeightsD(m):
     if type(m) != nn.BatchNorm2d and type(m) != nn.Sequential:
       for p in m.parameters():
         p.data.clamp_(-opt.clipD, opt.clipD)
+
+def clampWeightsG(m):
+    if type(m) != nn.BatchNorm2d and type(m) != nn.Sequential:
+      for p in m.parameters():
+        p.data.clamp_(-opt.clipG, opt.clipG)
+
+def clampWeightsE(m):
+    if type(m) != nn.BatchNorm2d and type(m) != nn.Sequential:
+      for p in m.parameters():
+        p.data.clamp_(-opt.clipE, opt.clipE)
+
+
 
 # autograd compatible resize  
 def resize2d(img, size):
@@ -737,7 +750,7 @@ for epoch in range(opt.niter):
         optimizerD.step()                                 # update D weights
       
         if opt.clipD > 0:
-            netD.apply(clampWeights)
+            netD.apply(clampWeightsD)
             #netD.zero_grad() # Doing this here will prevent generator from learning !!! Why?
 
         #
@@ -819,7 +832,7 @@ for epoch in range(opt.niter):
         optimizerG.step()                        # update G parameters
 
         if opt.clipG > 0:
-            netG.apply(clampWeights)
+            netG.apply(clampWeightsG)
             netG.zero_grad() # needed here or not?
 
 
@@ -841,10 +854,14 @@ for epoch in range(opt.niter):
                 #errE = l1_loss(noisev.detach(), z_enc)                                
             errE.backward()
             optimizerE.step()
-            optimizerG.step()  # should we really update G here too or not?
+            #optimizerG.step()  # should we really update G here too or not?
+
+            if opt.clipE > 0:
+                netE.apply(clampWeightsE)
+                netE.zero_grad() # needed here or not?
             
 
-            print('[%d/%d][%d/%d] Loss_D: %.2f Loss_G: %.2f / %.2f  Loss_E: %.2f D(x): %.2f D(G(z)): %.2f / %.2f Dist: %.2f TVLoss: %.2f Ez stat %.2f / %.2f'
+            print('[%d/%d][%d/%d] Loss_D: %.2f Loss_G: %.2f / %.2f  Loss_E: %.2f D(x): %.6f D(G(z)): %.6f / %.6f Dist: %.2f TVLoss: %.2f Ez stat %.2f / %.2f'
               % (epoch, opt.niter, i, len(dataloader),
                  errD.data, errG.data, errGadv.data, errE.data, D_x, D_G_z1, D_G_z2,  dist, tvl, embZstat[0], embZstat[1]))
         else:

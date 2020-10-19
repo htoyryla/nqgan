@@ -136,9 +136,9 @@ class _netG(nn.Module):
         self.size = opt.imageSize
         self.ngpu = ngpu
         self.nolin = opt.nolin 
-        self.relu = nn.ReLU(inplace=True)
-        if opt.elu:
-            self.relu = nn.ELU(inplace=True)
+        #self.activation = nn.ReLU(inplace=True)
+        #if opt.elu:
+        #    self.activation = nn.ELU(inplace=True)
         self.activation = nn.LeakyReLU(0.2, inplace=True)
         if opt.elu:
             self.activation = nn.ELU(inplace=True)
@@ -162,39 +162,28 @@ class _netG(nn.Module):
 
         def upsample_level(index, multin, multout, normL, bias):
  
-            if opt.upsample:
-              if index < upsample_steps :
-                layers = [ ("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
+            if opt.upsample:  # whole network built of upsample+conv layers
+              layers = [ ("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
                            ("replpad"+str(index), nn.ReplicationPad2d(1)), 
                            ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
-              else:
-                layers = [("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
-                          ("replpad"+str(index), nn.ReplicationPad2d(1)),
-                          ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
 
-            elif opt.upsample_after >= 0 and index < opt.upsample_after :
+            # note: opt.upsample_after default = 1000 so this takes care also for deconv only networks
+            elif opt.upsample_after >= 0 and index < opt.upsample_after :  # using deconv for lower and upsample+conv for higher
               if index < upsample_steps :
                 layers = [("deconv"+str(index), nn.ConvTranspose2d(self.ngf*multin, self.ngf*multout, 4, 2, 1, 0, bias=bias))]
-              else:
+              else:  # use larger kernel for topmost layers
                 layers = [("deconv"+str(index), nn.ConvTranspose2d(self.ngf*multin, self.ngf*multout, 6, 2, 2, 0, bias=bias))]
 
-            else:             
-              if index < upsample_steps :
-                layers = [ ("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
+            else:  # using deconv for lower and this is a higher layer so using upsample+conv 
+              layers = [ ("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
                            ("replpad"+str(index), nn.ReplicationPad2d(1)), 
                            ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
-              else:
-                layers = [("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
-                          ("replpad"+str(index), nn.ReplicationPad2d(1)),
-                          ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
 
-
-            if (norm_layer not in [PixelNormalization, None]):
+            if (normL not in [PixelNormalization, None]):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
-            layers.append(("relu"+str(index), self.activation)) #nn.LeakyReLU(0.2, inplace=True)))
-
-            if (norm_layer == PixelNormalization):
+            #layers.append(("relu"+str(index), self.activation)) 
+            if (normL == PixelNormalization):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
             if index in opt.median_ids and opt.median > 0:
@@ -208,6 +197,27 @@ class _netG(nn.Module):
             #    layers.append(("dropout"+str(index), nn.Dropout2d(opt.dropout))) 
 
             return layers
+            
+        class UpBlock(nn.Module):   
+            
+             def __init__(self, index, multin, multout, normL, activation, bias, residual=False, ngf=0):
+                 super(UpBlock, self).__init__()
+                 layers = upsample_level(index, multin, multout, normL, bias)
+                 self.blocks = nn.Sequential(OrderedDict(layers))
+                 self.residual = residual
+                 self.activation = activation
+                 if residual:
+                     self.shortcut = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'),
+                                 nn.Conv2d(ngf*multin, ngf*multout, 1, 1, 0, bias=bias))              
+                 
+             def forward(self, x):
+                 #print(self.activation)
+                 if self.residual:
+                     x = self.activation(self.shortcut(x) + self.blocks(x))
+                 else:
+                     x = self.activation(self.blocks(x))
+                 return x  
+                                  
  
         if self.nolin:
             if (norm_layer is None):
@@ -248,16 +258,16 @@ class _netG(nn.Module):
             else:
                 multout = multin                
             index = i + 1
-            upsampleL.extend(upsample_level(i+1, multin, multout, norm_layer, self.use_bias))
+            upsampleL.append(("upblock"+str(index), UpBlock(i+1, multin, multout, norm_layer, self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))
             multin = multout
 
         if opt.x2:
-            upsampleL.extend(upsample_level(i + 2, multin, multin, norm_layer, self.use_bias))        
+            upsampleL.append(("upblock"+str(i + 2), UpBlock(i + 2, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))       
         elif opt.x4:
-            upsampleL.extend(upsample_level(i + 2, multin, multin, norm_layer, self.use_bias))        
-            upsampleL.extend(upsample_level(i + 3, multin, multin, norm_layer, self.use_bias))        
+            upsampleL.append(("upblock"+str(i + 2), UpBlock(i + 2, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))        
+            upsampleL.append(("upblock"+str(i + 3), UpBlock(i + 3, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))        
 
-
+        #print(upsampleL)
         layers.extend(upsampleL)
 
         if opt.hardtanh:
@@ -276,8 +286,10 @@ class _netG(nn.Module):
         if opt.medianout > 0:
             layers.extend([("outmedian", MedianPool2d(kernel_size=opt.medianout, stride=1, same=True))])
 
-        #print(layers)
-        self.main = nn.Sequential(OrderedDict(layers))
+        print(layers)
+        ol = OrderedDict(layers)
+        print(ol)
+        self.main = nn.Sequential(ol)
         
     def forward(self, input):
         if not self.nolin:
@@ -308,9 +320,9 @@ class _netD(nn.Module):
             self.use_bias = norm_layer.func==nn.InstanceNorm2d
         else:
             self.use_bias = norm_layer==nn.InstanceNorm2d
-        self.relu = nn.ReLU(inplace=True)
+        self.activation = nn.ReLU(inplace=True)
         if opt.elu:
-            self.relu = nn.ELU(inplace=True)
+            self.activation = nn.ELU(inplace=True)
         self.activation = nn.LeakyReLU(0.2, inplace=True)
         if opt.elu:
             self.activation = nn.ELU(inplace=True)      
