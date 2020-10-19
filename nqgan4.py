@@ -214,7 +214,7 @@ if opt.blur > 0:
         assert(False, "Unknown blur type")
     #blur = kornia.filters.MedianBlur((blurKernel, blurKernel))
 
-from rnqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
+from nqmodel4 import _netG, _netD, _netE, weights_init, TVLoss
 
 rundir = os.path.join(opt.runroot,opt.name)
 
