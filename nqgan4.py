@@ -737,6 +737,7 @@ for epoch in range(opt.niter):
             olD = orth_loss.cpu().detach().numpy()
 
         l1reg = None
+        l1D = 0
         if opt.l1reg > 0:
             for name, param in netD.named_parameters():
                 if l1reg is None:
@@ -815,6 +816,7 @@ for epoch in range(opt.niter):
                 #errG = errG + orth_loss 
 
         l1reg = None
+        l1G = 0
         if opt.l1reg > 0:
             for name, param in netG.named_parameters():
                 if l1reg is None:
