@@ -16,6 +16,7 @@ from torch.autograd import Variable
 import functools
 from collections import OrderedDict
 from medianpool import MedianPool2d
+from Attention import Self_Attn
 
 #
 # code for models for traindcg2
@@ -179,6 +180,8 @@ class _netG(nn.Module):
                            ("replpad"+str(index), nn.ReplicationPad2d(1)), 
                            ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
 
+            if index in opt.attn_ids:
+                layers.append(("attn"+str(index), Self_Attn(self.ngf * multout)))
             if (normL not in [PixelNormalization, None]):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
@@ -353,6 +356,8 @@ class _netD(nn.Module):
                 layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
                           ("norm"+str(index), normL(self.ndf * multout)),
                           ("relu"+str(index), self.activation) ]
+            if index in opt.attnD_ids:
+                layers.append(("attn"+str(index), Self_Attn(self.ndf * multout)))
 
             if index in opt.dmedian_ids and opt.dmedian > 0:
                 median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.dmedian, stride=1, same=True)) 

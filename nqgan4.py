@@ -148,7 +148,9 @@ parser.add_argument('--dlr', type=str, default='', help='use discriminative lr')
 parser.add_argument('--dlrrange', type=int, default=0, help='use discriminative lr')
 parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales for G')
 parser.add_argument('--residual', action='store_true', help='use residual in G')
-
+parser.add_argument('--attention', type=str, default="", help='')
+parser.add_argument('--attentionD', type=str, default="", help='')
+parser.add_argument('--testpth', action='store_true', help='')
 
 raw_args = " ".join(sys.argv)
 print(raw_args)
@@ -189,6 +191,23 @@ for mid in str_dropout:
         dropout_ids.append(mid)
 opt.dropout_ids = dropout_ids
 
+str_attn = opt.attention.split(',')
+attn_ids = []
+for mid in str_attn:
+    if (mid == ""): continue
+    mid = int(mid)
+    if mid>=0:
+        attn_ids.append(mid)
+opt.attn_ids = attn_ids
+
+str_attnD = opt.attentionD.split(',')
+attnD_ids = []
+for mid in str_attnD:
+    if (mid == ""): continue
+    mid = int(mid)
+    if mid>=0:
+        attnD_ids.append(mid)
+opt.attnD_ids = attnD_ids
 
 if opt.save_everyD < 0:
     opt.save_everyD = opt.save_every
@@ -383,12 +402,32 @@ if opt.orthoG:
 
 if opt.netG != '':
     Gpar = torch.load(opt.netG)
+    Gpar_ = torch.load(opt.netG)
+    Gpar = {}
+    for k in Gpar_:
+        k1 = k
+        if "deconv" in k and not "upblock" in k:
+             split = k.split('.')
+             n = split[1].replace('deconv','')
+             k1 = k.replace("deconv"+n, "upblock"+n+".blocks.deconv"+n)
+             print(k1)
+        Gpar[k1] = Gpar_[k]
     try:
       netG.load_state_dict(Gpar, strict = not opt.nostrict)
     except RuntimeError:
       print("Layer size mismatch during loading") 
 
-print(netG)
+    if opt.testpth:
+        print("netG: comparing present model with loaded pth") 
+        newPar = netG.state_dict()
+        for k in newPar.keys():
+           if k in Gpar:
+                print(k, newPar[k].shape, Gpar[k].shape)
+           else:             
+                print(k, newPar[k].shape, "not in loaded file")
+        for k in Gpar.keys():
+            if k not in newPar.keys():
+                print(k, Gpar[k].shape, "not in new model")
 
 # discriminator
 
@@ -414,6 +453,17 @@ if opt.netD != '':
       netD.load_state_dict(Dpar, strict = not opt.nostrict)
     except RuntimeError:
       print("Layer size mismatch during loading") 
+    if opt.testpth:
+        print("netD: comparing present model with loaded pth") 
+        newPar = netD.state_dict()
+        for k in newPar.keys():
+           if k in Dpar:
+                print(k, newPar[k].shape, Dpar[k].shape)
+           else:             
+                print(k, newPar[k].shape, "not in loaded file")
+        for k in Dpar.keys():
+            if k not in newPar.keys():
+                print(k, Dpar[k].shape, "not in new model")
 
 
 print(netD)
