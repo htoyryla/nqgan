@@ -74,6 +74,7 @@ parser.add_argument('--cyclr', type=float, default=-1, help='')
 parser.add_argument('--step', type=int, default=40, help='lr step, default=40')
 parser.add_argument('--gamma', type=float, default=0.1, help='gamma, default=0.1')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
+parser.add_argument('--bneps', type=float, default=1e-5, help='eps for batch norm')
 parser.add_argument('--netG', default='', help="path to netG (to continue training)")
 parser.add_argument('--netD', default='', help="path to netD (to continue training)")
 parser.add_argument('--netE', default='', help="path to netE (to continue training)")
@@ -150,12 +151,20 @@ parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales fo
 parser.add_argument('--residual', action='store_true', help='use residual in G')
 parser.add_argument('--attention', type=str, default="", help='')
 parser.add_argument('--attentionD', type=str, default="", help='')
+parser.add_argument('--monitor', action='store_true', help='')
+parser.add_argument('--nonlin1st', action='store_true', help='place nonlinearity before normalization')
 parser.add_argument('--testpth', action='store_true', help='')
+parser.add_argument('--floodG', type=float, default=0, help='')
+parser.add_argument('--floodD', type=float, default=0, help='')
 
 raw_args = " ".join(sys.argv)
 print(raw_args)
 
 opt = parser.parse_args()
+
+if opt.monitor:
+    import matplotlib.pyplot as plt
+    from functools import partial
 
 str_ids = opt.gpu_ids.split(',')
 gpu_ids = []
@@ -415,8 +424,8 @@ if opt.netG != '':
     try:
       netG.load_state_dict(Gpar, strict = not opt.nostrict)
     except RuntimeError:
-      print("Layer size mismatch during loading") 
-
+      print("Layer size mismatch during loading")
+      
     if opt.testpth:
         print("netG: comparing present model with loaded pth") 
         newPar = netG.state_dict()
@@ -428,6 +437,7 @@ if opt.netG != '':
         for k in Gpar.keys():
             if k not in newPar.keys():
                 print(k, Gpar[k].shape, "not in new model")
+
 
 # discriminator
 
@@ -678,9 +688,41 @@ def resize2d(img, size):
     return (F.adaptive_avg_pool2d(Variable(img), size)).data
 
 
+
 # main training loop starts here
 
+if opt.monitor:
+    actG_means = [[] for _ in netG.modules()]
+    actG_std = [[] for _ in netG.modules()]
+    actD_means = [[] for _ in netD.modules()]
+    actD_std = [[] for _ in netD.modules()]
 
+    def append_stats_netG(i, mod, inp, outp):
+        actG_means[i].append(outp.data.mean())
+        actG_std[i].append(outp.data.std())
+
+    def append_stats_netD(i, mod, inp, outp):
+        actD_means[i].append(outp.data.mean())
+        actD_std[i].append(outp.data.std())
+    
+    '''
+    i = 0
+    for _, m in enumerate(netG.modules()):
+        classname = m.__class__.__name__
+        if "UpBlock" in classname:
+            print(classname) 
+            m.register_forward_hook(partial(append_stats_netG, i))
+            i += 1
+
+    i = 0
+    for _, (name, m) in enumerate(netD.named_modules()):
+        
+        #print(name)
+        if ("conv" in name) and not "attn" in name:
+            print(name) 
+            m.register_forward_hook(partial(append_stats_netD, i))
+            i += 1
+    '''
 
 imgCtr = 0
 blurCtr = opt.blurstep
@@ -763,6 +805,10 @@ for epoch in range(opt.niter):
 
         errD = errD_real + errD_fake                      # total D err display
         
+        if opt.floodD > 0:
+            errD = abs(errD - opt.floodD) + opt.floodD    
+        
+        
         olD = 0
         if opt.orthoD:
             #with torch.enable_grad():
@@ -842,6 +888,9 @@ for epoch in range(opt.niter):
                 tvl = tvloss(fake_z)            # just add TV loss on G(z)
                 errG = errG + tvl
             dist = 0
+        
+        if opt.floodG > 0:
+            errG = abs(errG - opt.floodG) + opt.floodG    
 
         olG = 0
         if opt.orthoG:
@@ -983,6 +1032,62 @@ for epoch in range(opt.niter):
         #torch.save(netG.state_dict(), opt.runroot+'/%s/model/netG_epoch_%d.pth' % (opt.name, epoch))
         torch.save(netD.state_dict(), opt.runroot+'/%s/model/netD_epoch_%d.pth' % (opt.name, epoch))
 
+    if opt.monitor:
+        i = 0
+        for _, m in enumerate(netG.modules()):
+            classname = m.__class__.__name__
+            if "Attn" in classname:
+                print(classname)
+                attn_map = m.map #torch.sum(m.map, 1).unsqueeze(1).repeat(1,3,1,1)
+                cmax = attn_map.shape[1]
+                print(attn_map.shape)
+                for c in range(0, cmax):
+                    cmap = attn_map[:,c,:,:].unsqueeze(1).repeat(1,3,1,1)
+                    print(c, cmap.shape)
+                    vutils.save_image(cmap,
+                        opt.runroot+'/%s/debug/netG_attention_epoch_%03d_%03d_%03d.png' % (opt.name, epoch, i, c),
+                        normalize=True) 
+                i += 1
+
+        for _, m in enumerate(netD.modules()):
+            classname = m.__class__.__name__
+            if "Attn" in classname:
+                print(classname)
+                attn_map = m.map #torch.sum(m.map, 1).unsqueeze(1).repeat(1,3,1,1)
+                cmax = attn_map.shape[1]
+                print(attn_map.shape)
+                for c in range(0, cmax):
+                    cmap = attn_map[:,c,:,:].unsqueeze(1).repeat(1,3,1,1)
+                    print(c, cmap.shape)
+                    vutils.save_image(cmap,
+                        opt.runroot+'/%s/debug/netD_attention_epoch_%03d_%03d_%03d.png' % (opt.name, epoch, i, c),
+                        normalize=True) 
+                i += 1
+        '''
+        for o in actD_means: plt.plot(o)
+        plt.legend(range(6))
+        #plt.show()
+        plt.savefig("netD.png")
+        plt.clf()
+
+        for o in actD_std: plt.plot(o)
+        plt.legend(range(6))
+        #plt.show()
+        plt.savefig("netDstd.png")
+        plt.clf()
+
+        for o in actG_std: plt.plot(o)
+        plt.legend(range(6))
+        #plt.show()
+        plt.savefig("netGstd.png")
+        plt.clf()
+
+        for o in actG_means: plt.plot(o)
+        plt.legend(range(6))
+        #plt.show()
+        plt.savefig("netG.png")
+        plt.clf()
+        '''
 
     #step lrRate
     if opt.cyclr <= 0:

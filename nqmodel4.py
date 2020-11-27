@@ -140,6 +140,10 @@ class _netG(nn.Module):
         #self.activation = nn.ReLU(inplace=True)
         #if opt.elu:
         #    self.activation = nn.ELU(inplace=True)
+
+        #if norm_layer == nn.BatchNorm2d:
+        #    norm_layer = nn.BatchNorm2d(eps = opt.bneps)
+
         self.activation = nn.LeakyReLU(0.2, inplace=True)
         if opt.elu:
             self.activation = nn.ELU(inplace=True)
@@ -161,7 +165,7 @@ class _netG(nn.Module):
 
         n512 = upsample_steps - 5
 
-        def upsample_level(index, multin, multout, normL, bias):
+        def upsample_level(index, multin, multout, normL, bias, monitor):
  
             if opt.upsample:  # whole network built of upsample+conv layers
               layers = [ ("upsample"+str(index), nn.Upsample(scale_factor=2, mode='nearest')),
@@ -181,7 +185,8 @@ class _netG(nn.Module):
                            ("conv"+str(index), nn.Conv2d(self.ngf*multin, self.ngf*multout, 3, 1, 0, bias=bias))]
 
             if index in opt.attn_ids:
-                layers.append(("attn"+str(index), Self_Attn(self.ngf * multout)))
+                layers.append(("attn"+str(index), Self_Attn(self.ngf * multout, monitor=monitor)))
+
             if (normL not in [PixelNormalization, None]):
                 layers.append(("norm"+str(index), normL(self.ngf * multout)))
 
@@ -203,9 +208,9 @@ class _netG(nn.Module):
             
         class UpBlock(nn.Module):   
             
-             def __init__(self, index, multin, multout, normL, activation, bias, residual=False, ngf=0):
+             def __init__(self, index, multin, multout, normL, activation, bias, residual=False, ngf=0, monitor=False):
                  super(UpBlock, self).__init__()
-                 layers = upsample_level(index, multin, multout, normL, bias)
+                 layers = upsample_level(index, multin, multout, normL, bias, monitor)
                  self.blocks = nn.Sequential(OrderedDict(layers))
                  self.residual = residual
                  self.activation = activation
@@ -261,14 +266,14 @@ class _netG(nn.Module):
             else:
                 multout = multin                
             index = i + 1
-            upsampleL.append(("upblock"+str(index), UpBlock(i+1, multin, multout, norm_layer, self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))
+            upsampleL.append(("upblock"+str(index), UpBlock(i+1, multin, multout, norm_layer, self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf, monitor=opt.monitor)))
             multin = multout
 
         if opt.x2:
-            upsampleL.append(("upblock"+str(i + 2), UpBlock(i + 2, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))       
+            upsampleL.append(("upblock"+str(i + 2), UpBlock(i + 2, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf, monitor=opt.monitor)))       
         elif opt.x4:
-            upsampleL.append(("upblock"+str(i + 2), UpBlock(i + 2, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))        
-            upsampleL.append(("upblock"+str(i + 3), UpBlock(i + 3, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf)))        
+            upsampleL.append(("upblock"+str(i + 2), UpBlock(i + 2, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf, monitor=opt.monitor)))        
+            upsampleL.append(("upblock"+str(i + 3), UpBlock(i + 3, multin, multin, norm_layer,  self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf, monitor=opt.monitor)))        
 
         #print(upsampleL)
         layers.extend(upsampleL)
@@ -319,6 +324,9 @@ class _netD(nn.Module):
         else:
             self.size = opt.Dsize
         self.ngpu = ngpu
+        #if norm_layer == nn.BatchNorm2d:
+        #    norm_layer = nn.BatchNorm2d(eps = opt.bneps)
+        #    print("******************", norm_layer)
         if type(norm_layer) == functools.partial:
             self.use_bias = norm_layer.func==nn.InstanceNorm2d
         else:
@@ -329,7 +337,7 @@ class _netD(nn.Module):
         self.activation = nn.LeakyReLU(0.2, inplace=True)
         if opt.elu:
             self.activation = nn.ELU(inplace=True)      
-      
+  
         print("defining _netD")
 
         start_idx = 0
@@ -346,19 +354,27 @@ class _netD(nn.Module):
         inputSize = int(self.size) # note that the first convlayer above these already downsamples by 2
         multin = 1
 
-        def downsample_level(index, multin, multout, normL, bias):
+        def downsample_level(index, multin, multout, normL, bias, monitor):
             if opt.D2:
                 layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
-                          ("convb"+str(index), nn.Conv2d(self.ndf*multout, self.ndf*multout, 3, 1, 1, bias=self.use_bias)),
-                          ("norm"+str(index), normL(self.ndf * multout)),
-                          ("relu"+str(index), self.activation) ]
+                          ("convb"+str(index), nn.Conv2d(self.ndf*multout, self.ndf*multout, 3, 1, 1, bias=self.use_bias))]
             else:
-                layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias)),
-                          ("norm"+str(index), normL(self.ndf * multout)),
-                          ("relu"+str(index), self.activation) ]
-            if index in opt.attnD_ids:
-                layers.append(("attn"+str(index), Self_Attn(self.ndf * multout)))
+                layers = [("conv"+str(index), nn.Conv2d(self.ndf*multin, self.ndf*multout, 4, 2, 1, bias=self.use_bias))]
 
+            if index in opt.attnD_ids:
+                layers.append(("attn"+str(index), Self_Attn(self.ndf * multout, monitor=monitor)))
+            
+            if opt.nonlin1st:
+                layers.append(("relu"+str(index), self.activation))
+  
+            if normL == nn.BatchNorm2d:
+                layers.append(("norm"+str(index), normL(self.ndf * multout, eps=opt.bneps)))
+            else:
+                layers.append(("norm"+str(index), normL(self.ndf * multout)))
+
+            if not opt.nonlin1st:
+                layers.append(("relu"+str(index), self.activation))
+            
             if index in opt.dmedian_ids and opt.dmedian > 0:
                 median_layer = ("median"+str(index), MedianPool2d(kernel_size=opt.dmedian, stride=1, same=True)) 
                 layers.insert(0, median_layer)
@@ -368,24 +384,54 @@ class _netD(nn.Module):
 
             return layers
 
-        if opt.x2:
+        if norm_layer == nn.BatchNorm2d:
+            norm0 = ("norm0", norm_layer(self.ndf, eps=opt.bneps))
+            norm0b = ("norm0b", norm_layer(self.ndf, eps=opt.bneps))
+        else:
+            norm0 = ("norm0", norm_layer(self.ndf))   
+            norm0b = ("norm0b", norm_layer(self.ndf))   
+
+
+        if opt.nonlin1st:
+          if opt.x2:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
                       ("inrelu", self.activation),
                       ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
-                      ("norm0", norm_layer(self.ndf)),
+                      ("relu0", self.activation),
+                      norm0
+                      ]
+          elif opt.x4:
+            layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ("inrelu", self.activation),
+                      ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
+                      ("relu0", self.activation),
+                      norm0,
+                      ("conv0b", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
+                      ("relu0b", self.activation),
+                      norm0b
+                      ]
+          else:
+            layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ("inrelu", self.activation)]
+        else:
+          if opt.x2:
+            layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
+                      ("inrelu", self.activation),
+                      ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
+                      norm0,
                       ("relu0", self.activation)
                       ]
-        elif opt.x4:
+          elif opt.x4:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
                       ("inrelu", self.activation),
                       ("conv0", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
-                      ("norm0", norm_layer(self.ndf)),
+                      norm0,
                       ("relu0", self.activation),
                       ("conv0b", nn.Conv2d(self.ndf, self.ndf, 4, 2, 1, bias=self.use_bias)),
-                      ("norm0b", norm_layer(self.ndf)),
+                      norm0b,
                       ("relu0b", self.activation)
                       ]
-        else:
+          else:
             layers = [("inconv", nn.Conv2d(self.nc, self.ndf, kernel_size=4, stride=2, padding=1, bias=self.use_bias)),
                       ("inrelu", self.activation)]
 
@@ -404,7 +450,7 @@ class _netD(nn.Module):
             index = i + 1
             print(index, multin, multout, inputSize)  
 
-            dnsampleL.extend(downsample_level(index, multin, multout, norm_layer, self.use_bias))
+            dnsampleL.extend(downsample_level(index, multin, multout, norm_layer, self.use_bias, opt.monitor))
             multin = multout
 
         layers.extend(dnsampleL)
