@@ -19,6 +19,7 @@ import numpy as np
 import cv2
 import torch.nn.functional as F
 from DiscriminativeLR import discriminative_lr_params
+from FocalLoss import WeightedFocalLoss 
 
 # gan trainer
 # htoyryla 30 Jul 2018
@@ -156,6 +157,10 @@ parser.add_argument('--nonlin1st', action='store_true', help='place nonlinearity
 parser.add_argument('--testpth', action='store_true', help='')
 parser.add_argument('--floodG', type=float, default=0, help='')
 parser.add_argument('--floodD', type=float, default=0, help='')
+parser.add_argument('--focal', action='store_true', help='')
+parser.add_argument('--focal_alpha', type=float, default=0.25, help='')
+parser.add_argument('--focal_gamma', type=float, default=2.0, help='')
+
 
 raw_args = " ".join(sys.argv)
 print(raw_args)
@@ -545,6 +550,8 @@ class GANLoss(nn.Module):
         self.noisy = noisy
         if use_lsgan:
             self.loss = nn.MSELoss()
+        elif opt.focal:
+            self.loss = WeightedFocalLoss(opt.focal_alpha, opt.focal_gamma)
         #elif opt.ssim:
         #    self.loss = kornia.SSIM(5)
         else:
