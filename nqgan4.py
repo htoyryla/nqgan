@@ -509,20 +509,24 @@ if not opt.withoutE:
 
 def getLevel(str):
     level = -1 
+    key = ""
     if "deconv" in str:
         level = str.replace("deconv", "")
-    #print(str, level)
-    return int(level)
+        key = "deconv"+level
+    elif "upblock" in str:
+        level = str.replace("upblock", "")
+        key = "upblock"+level+".blocks.deconv"+level
+    return int(level), key
 
 if len(fG_ids) > 0:
-    #print(fG_ids)
+    #print(Gpar.keys())
     for key, mod in netG.main.named_children():
-      level = getLevel(key)
+      level, newkey = getLevel(key)
       if level < 0:
           continue
       if level in fG_ids:
           #if k[0] == "outconv": continue #do not freeze the final output layer
-          layer = "main."+key
+          layer = "main."+newkey
           #print(level, layer)
           w = layer +".weight"
           if w in Gpar.keys():	     
