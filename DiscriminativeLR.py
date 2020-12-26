@@ -94,11 +94,12 @@ def build_param_dicts(layers:nn.Sequential, lr:list=[0], return_len:bool=False)-
     params = []
     idx = 0
     for layer in layers:
+        #print(layer)
         param = []
         if (hasattr(layer, "requires_grad") and layer.requires_grad):
             #To implement for custom nn.Parameter()
             print("Custom nn.Parameter() not supported")
-        if(hasattr(layer, "weight") and layer.weight.requires_grad):
+        if(hasattr(layer, "weight") and hasattr(layer.weight, "requires_grad") and layer.weight.requires_grad):
             param.append(layer.weight)
         if (hasattr(layer, "bias") and hasattr(layer.bias, "requires_grad") and layer.bias.requires_grad):
             param.append(layer.bias)
@@ -107,7 +108,7 @@ def build_param_dicts(layers:nn.Sequential, lr:list=[0], return_len:bool=False)-
 
     return len(params) if return_len else params
 
-def discriminative_lr_params(net:nn.Module, lr:slice, unfreeze:bool=True)->Union[list,np.ndarray,nn.Sequential]:
+def discriminative_lr_params(net:nn.Module, lr:slice, unfreeze:bool=True, reverse:bool=False)->Union[list,np.ndarray,nn.Sequential]:
     '''
     Flatten our model and generate a list of dictionnaries to be passed to the
     optimizer.
@@ -127,6 +128,8 @@ def discriminative_lr_params(net:nn.Module, lr:slice, unfreeze:bool=True)->Union
 
     #Create the list of learning rates
     list_lr = lr_range(net, lr, model_len)
+    if reverse:
+        list_lr.reverse()
 
     #Create our optimizer parameters list of dictionnaries
     params_layers = build_param_dicts(layers, list_lr)

@@ -20,6 +20,7 @@ import cv2
 import torch.nn.functional as F
 from DiscriminativeLR import discriminative_lr_params
 from FocalLoss import WeightedFocalLoss 
+from image_pool import ImagePool
 
 # gan trainer
 # htoyryla 30 Jul 2018
@@ -88,6 +89,7 @@ parser.add_argument('--hgan2', action='store_true', help='use hgan style 2 discr
 parser.add_argument('--rsgan', action='store_true', help='use rsgan')
 parser.add_argument('--D2', action='store_true', help='use additional convlayers in D')
 parser.add_argument('--elu', action='store_true', help='use ELU')
+parser.add_argument('--sinerelu', action='store_true', help='use SineReLU')
 parser.add_argument('--instance', action='store_true', help='use instance norm')
 parser.add_argument('--batchnorm', action='store_true', help='use batch norm')
 parser.add_argument('--nonorm', action='store_true', help='no norm layer')
@@ -149,6 +151,7 @@ parser.add_argument('--hardtanh', action='store_true', help='use hardtang in G')
 parser.add_argument('--dlr', type=str, default='', help='use discriminative lr')
 parser.add_argument('--dlrrange', type=int, default=0, help='use discriminative lr')
 parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales for G')
+parser.add_argument('--dlrDrev', action='store_true', help='reverse lr scales for D')
 parser.add_argument('--residual', action='store_true', help='use residual in G')
 parser.add_argument('--attention', type=str, default="", help='')
 parser.add_argument('--attentionD', type=str, default="", help='')
@@ -160,6 +163,11 @@ parser.add_argument('--floodD', type=float, default=0, help='')
 parser.add_argument('--focal', action='store_true', help='')
 parser.add_argument('--focal_alpha', type=float, default=0.25, help='')
 parser.add_argument('--focal_gamma', type=float, default=2.0, help='')
+parser.add_argument('--fakepool', type=int, default=0, help='')
+parser.add_argument('--layer_noise', type=float, default=0, help='')
+parser.add_argument('--noiselayers', type=str, default="", help='')
+parser.add_argument('--xlayers', type=int, default=0, help='')
+parser.add_argument('--xDcorr', action='store_true', help='')
 
 
 raw_args = " ".join(sys.argv)
@@ -222,6 +230,15 @@ for mid in str_attnD:
     if mid>=0:
         attnD_ids.append(mid)
 opt.attnD_ids = attnD_ids
+
+str_noiseL = opt.noiselayers.split(',')
+noise_ids = []
+for mid in str_noiseL:
+    if (mid == ""): continue
+    mid = int(mid)
+    if mid>=0:
+        noise_ids.append(mid)
+opt.noise_ids = noise_ids
 
 if opt.save_everyD < 0:
     opt.save_everyD = opt.save_every
@@ -464,6 +481,23 @@ if opt.orthoD:
 
 if opt.netD != '':
     Dpar = torch.load(opt.netD)
+
+    if opt.xDcorr and opt.xlayers > 0:
+        xltkeys = ['conv0d', 'conv0c','conv0b','conv0', 'norm0d', 'norm0c','norm0b','norm0']
+        xlt2keys = ['conv0e','conv0d','conv0c', 'conv0b', 'norm0e','norm0d','norm0c', 'norm0b'] 
+        #xltkeys = xltkeys[opt.xlayers]
+        print(xltkeys)
+        for p_ in Dpar.keys():
+            for xl in xltkeys:
+                if xl in p_.split('.'):
+                    xl2 = xlt2keys[xltkeys.index(xl)]                
+                    p2 = p_.replace(xl, xl2)
+                    print(p_, p2)
+                    Dpar[p2] = Dpar[p_]
+                    #TODO delete the irrelevant key(s)
+                    #del Dpar[p_]
+        print(Dpar.keys()) 
+
     try:
       netD.load_state_dict(Dpar, strict = not opt.nostrict)
     except RuntimeError:
@@ -617,33 +651,56 @@ if opt.cuda:
 
 fixed_noise = Variable(fixed_noise)
 
+    
 if opt.dlr != '' and opt.dlrrange > 0 :
-    paramsG, lr_arrG, _ = discriminative_lr_params(netG, slice(opt.lrG/opt.dlrrange, opt.lrG))
-    paramsD, lr_arrD, _ = discriminative_lr_params(netD, slice(opt.lrD/opt.dlrrange, opt.lrD))
     if opt.dlrGrev:
-        lr_arrG = lr_arrG[::-1]
+        lrsG = slice(opt.lrG, opt.lrG/opt.dlrrange)
+    else:
+        lrsG = slice(opt.lrG/opt.dlrrange, opt.lrG)
+    if opt.dlrDrev:
+        lrsD = slice(opt.lrD, opt.lrD/opt.dlrrange)     
+    else:        
+        lrsD = slice(opt.lrD/opt.dlrrange, opt.lrD)     
+    
+    paramsG, lr_arrG, _ = discriminative_lr_params(netG, lrsG)
+    paramsD, lr_arrD, _ = discriminative_lr_params(netD, lrsD)
+    
+elif opt.dlr != '':
+    lrsG = slice(opt.lrG)
+    #if opt.dlrGrev: 
+    #     lrsG = lrsG[::-1]
+    lrsD = slice(opt.lrD)     
+    #if opt.dlrDrev: 
+    #     lrsD = lrsD[::-1]
+
+    paramsG, lr_arrG, _ = discriminative_lr_params(netG, lrsG, reverse=opt.dlrGrev)
+    paramsD, lr_arrD, _ = discriminative_lr_params(netD, lrsD, reverse=opt.dlrDrev)
 else:
-    paramsG, lr_arrG, _ = discriminative_lr_params(netG, slice(opt.lrG))
-    paramsD, lr_arrD, _ = discriminative_lr_params(netD, slice(opt.lrD))
+    paramsG = netG.parameters()
+    paramsD = netD.parameters()
+
+if 'D' in opt.dlr:
+    print("D lr:", lr_arrD)
+if 'G' in opt.dlr:
+    print("G lr:", lr_arrG)
 
 # setup optimizer
 if opt.cyclr < 0:
-    optimizerD = optim.Adam(netD.parameters(), lr=opt.lrD, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
-    optimizerG = optim.Adam(netG.parameters(), lr=opt.lrG, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
+    optimizerD = optim.Adam(paramsD, lr=opt.lrD, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
+    optimizerG = optim.Adam(paramsG, lr=opt.lrG, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
     if not opt.withoutE:
         optimizerE = optim.Adam(netE.parameters(), lr=opt.lrE, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
 elif opt.dlr != '':
-    print(lr_arrG)
-    print(lr_arrD)
-
     if 'D' in opt.dlr:
+        #print("D lr:", lr_arrD)
         optimizerD = optim.RMSprop(paramsD, lr=opt.lrD, weight_decay=opt.weight_decay)
-    else:
-        optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
+    #else:
+    #    optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
     if 'G' in opt.dlr:
+        #print("G lr:", lr_arrG)
         optimizerG = optim.RMSprop(paramsG, lr=opt.lrG, weight_decay=opt.weight_decay)
-    else:
-        optimizerG = optim.RMSprop(netG.parameters(), lr=opt.lrG, weight_decay=opt.weight_decay)
+    #else:
+    #    optimizerG = optim.RMSprop(netG.parameters(), lr=opt.lrG, weight_decay=opt.weight_decay)
     if not opt.withoutE:
         optimizerE = optim.RMSprop(netE.parameters(), lr=opt.lrE, weight_decay=opt.weight_decay)
 else:    
@@ -735,6 +792,10 @@ if opt.monitor:
             i += 1
     '''
 
+if opt.fakepool > 0:
+    fakepool = ImagePool(opt.fakepool)        
+    
+
 imgCtr = 0
 blurCtr = opt.blurstep
 blurState = True
@@ -808,7 +869,12 @@ for epoch in range(opt.niter):
         noisev = noise.detach() 
         fake_z = netG(noisev.detach()) 		          # G(z), why detach?
 
-        output = netD(fake_z.detach())                    # D(G(z))
+        if opt.fakepool > 0:
+            fake_zp = fakepool.query(fake_z.detach())
+            #fake_zp = fakepool.query(fake_z.clone().detach()) # TRY NEXT???
+            output = netD(fake_zp.detach())                    # D(G(z))
+        else:
+            output = netD(fake_z.detach())                    # D(G(z))
         errD_fake = Dcriterion(output, False)             # get err ref to fake
 
         errD_fake.backward()                              # get D_fake gradients
@@ -940,6 +1006,7 @@ for epoch in range(opt.niter):
 
         errG.backward(retain_graph = (not opt.withoutE))   # get G gradients, need to retain graph if encoder is used
         D_G_z2 = output.data.mean() 
+        ### TODO with fakepool D_G_z1 is now obtained with a different set (only affects printouts?)
         # DGz1 is taken before D update and DGz2 after
         optimizerG.step()                        # update G parameters
 

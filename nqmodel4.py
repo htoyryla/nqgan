@@ -17,6 +17,7 @@ import functools
 from collections import OrderedDict
 from medianpool import MedianPool2d
 from Attention import Self_Attn
+from sinerelu import SineReLU
 
 #
 # code for models for traindcg2
@@ -137,6 +138,7 @@ class _netG(nn.Module):
         self.size = opt.imageSize
         self.ngpu = ngpu
         self.nolin = opt.nolin 
+        self.noise_ids = opt.noise_ids
         #self.activation = nn.ReLU(inplace=True)
         #if opt.elu:
         #    self.activation = nn.ELU(inplace=True)
@@ -147,6 +149,8 @@ class _netG(nn.Module):
         self.activation = nn.LeakyReLU(0.2, inplace=True)
         if opt.elu:
             self.activation = nn.ELU(inplace=True)
+        elif opt.sinerelu:
+            self.activation = SineReLU()    
 
         if type(norm_layer) == functools.partial:
             self.use_bias = norm_layer.func == nn.InstanceNorm2d
@@ -208,18 +212,21 @@ class _netG(nn.Module):
             
         class UpBlock(nn.Module):   
             
-             def __init__(self, index, multin, multout, normL, activation, bias, residual=False, ngf=0, monitor=False):
+             def __init__(self, index, multin, multout, normL, activation, bias, residual=False, ngf=0, monitor=False, noise = 0):
                  super(UpBlock, self).__init__()
                  layers = upsample_level(index, multin, multout, normL, bias, monitor)
                  self.blocks = nn.Sequential(OrderedDict(layers))
                  self.residual = residual
                  self.activation = activation
+                 self.noise = noise      
                  if residual:
                      self.shortcut = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'),
                                  nn.Conv2d(ngf*multin, ngf*multout, 1, 1, 0, bias=bias))              
                  
              def forward(self, x):
                  #print(self.activation)
+                 if self.noise > 0:
+                     x = x + x.new(x.shape).normal_(0, self.noise)
                  if self.residual:
                      x = self.activation(self.shortcut(x) + self.blocks(x))
                  else:
@@ -258,7 +265,9 @@ class _netG(nn.Module):
         upsampleL = []
         outputSize = 2
         multin = 8
-        #print(self.size, upsample_steps, n512)  
+
+        n512 = n512 - opt.xlayers
+        print(self.size, upsample_steps, n512)  
         for i in range(0, upsample_steps):
             outputSize = outputSize * 2 
             if i > n512 and multin > 1:
@@ -266,7 +275,11 @@ class _netG(nn.Module):
             else:
                 multout = multin                
             index = i + 1
-            upsampleL.append(("upblock"+str(index), UpBlock(i+1, multin, multout, norm_layer, self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf, monitor=opt.monitor)))
+            noise = 0
+            print(i,index, outputSize, multin, multout)
+            if i in opt.noise_ids:
+                noise = opt.layer_noise
+            upsampleL.append(("upblock"+str(index), UpBlock(i+1, multin, multout, norm_layer, self.activation, self.use_bias, residual=opt.residual, ngf=self.ngf, monitor=opt.monitor, noise=noise)))
             multin = multout
 
         if opt.x2:
@@ -336,11 +349,14 @@ class _netD(nn.Module):
             self.activation = nn.ELU(inplace=True)
         self.activation = nn.LeakyReLU(0.2, inplace=True)
         if opt.elu:
-            self.activation = nn.ELU(inplace=True)      
+            self.activation = nn.ELU(inplace=True)
+        elif opt.sinerelu:
+            self.activation = SineReLU()    
+                  
   
         print("defining _netD")
 
-        start_idx = 0
+        start_idx = 0 #- opt.xlayers
         if opt.x2:
             self.size = int(self.size/2)
             #start_idx = 1 
@@ -348,8 +364,8 @@ class _netD(nn.Module):
             self.size = int(self.size/4)
             #start_idx = 1 
 
-        downsample_steps = int(round(math.log(self.size, 2))) - 3
-        n512 = downsample_steps - 3
+        downsample_steps = int(round(math.log(self.size, 2))) - 3 - opt.xlayers
+        n512 = downsample_steps - 3 #+ opt.xlayers
         dnsampleL = []
         inputSize = int(self.size) # note that the first convlayer above these already downsamples by 2
         multin = 1
@@ -439,8 +455,18 @@ class _netD(nn.Module):
                 median_layer = ("medianin", MedianPool2d(kernel_size=opt.dmedianin, stride=1, same=True)) 
                 layers.insert(0, median_layer)
 
+
+        suffix = ['', 'b', 'c', 'd', 'e']
+
         print(layers)
-        print(self.size, downsample_steps, n512)  
+        print(self.size, downsample_steps, n512, start_idx)
+        if opt.xlayers > 0:
+          for i in range(0, opt.xlayers):
+            inputSize = int(inputSize / 2) 
+            index = '0' + suffix[i]
+            print(i, index, multin, multin, inputSize)  
+            dnsampleL.extend(downsample_level(index, multin, multin, norm_layer, self.use_bias, opt.monitor))
+  
         for i in range(start_idx, downsample_steps+start_idx):
             inputSize = int(inputSize / 2) 
             if multin < 8:
@@ -448,8 +474,7 @@ class _netD(nn.Module):
             else:
                  multout = multin               
             index = i + 1
-            print(index, multin, multout, inputSize)  
-
+            print(i, index, multin, multout, inputSize)  
             dnsampleL.extend(downsample_level(index, multin, multout, norm_layer, self.use_bias, opt.monitor))
             multin = multout
 
