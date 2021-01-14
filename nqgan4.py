@@ -17,8 +17,8 @@ from torch.autograd import Variable
 from torch.optim import lr_scheduler
 import numpy as np
 import cv2
-import torch.nn.functional as F
-from DiscriminativeLR import discriminative_lr_params
+#import torch.nn.functional as F
+from DiscriminativeLRt import discriminative_lr_params
 from FocalLoss import WeightedFocalLoss 
 from image_pool import ImagePool
 
@@ -150,8 +150,8 @@ parser.add_argument('--orthoG', action='store_true', help='orthogonal G weights'
 parser.add_argument('--hardtanh', action='store_true', help='use hardtang in G')
 parser.add_argument('--dlr', type=str, default='', help='use discriminative lr')
 parser.add_argument('--dlrrange', type=int, default=0, help='use discriminative lr')
-parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales for G')
-parser.add_argument('--dlrDrev', action='store_true', help='reverse lr scales for D')
+#parser.add_argument('--dlrGrev', action='store_true', help='reverse lr scales for G')
+#parser.add_argument('--dlrDrev', action='store_true', help='reverse lr scales for D')
 parser.add_argument('--residual', action='store_true', help='use residual in G')
 parser.add_argument('--attention', type=str, default="", help='')
 parser.add_argument('--attentionD', type=str, default="", help='')
@@ -309,7 +309,7 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
-opt.cuda=False
+#opt.cuda=False
 if torch.cuda.is_available():
     opt.cuda=True
     torch.cuda.manual_seed_all(opt.manualSeed)
@@ -429,6 +429,60 @@ if opt.orthoG:
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
             nn.init.orthogonal(m.weight)
 
+# TEST CODE
+'''
+def getLevel2G(l):
+    level = -1 
+    down = False
+    if "deconv" in l:
+        level = l.replace("deconv", "")
+        #key = "deconv"+level
+    elif "upblock" in l:
+        level = l.replace("upblock", "")
+        down = True # = "upblock"+level+".blocks.deconv"+level
+    elif "in" in l:
+        level = 0
+        #key = l
+    elif "out" in l:
+        level = -1
+        #key = l      
+    return int(level), down
+    
+
+maxlevel = 0
+G_groups = {}
+for key, mod in netG.main.named_children():
+    level, down = getLevel2G(key)
+    if level > maxlevel:
+        maxlevel = level
+    print(key, level)
+    
+    if not down:  # add the layer directly
+        if level in G_groups:
+            G_groups[level].append(key)
+        else:
+            G_groups[level] = [key]
+    else:  # add the children layers instead
+        for m in mod.children():  # blocks, shortcut, activation
+          for key, submod in m.named_children():
+            #print(key, submod)  
+            if level in G_groups:
+                G_groups[level].append(key)
+            else:
+                G_groups[level] = [key]
+            
+                
+G_groups[maxlevel+1] = G_groups[-1]    
+del G_groups[-1]    
+print(G_groups)            
+
+#exit()
+
+# ENDS
+
+'''
+
+
 # load prelearned weights if any
 
 if opt.netG != '':
@@ -442,12 +496,49 @@ if opt.netG != '':
              n = split[1].replace('deconv','')
              k1 = k.replace("deconv"+n, "upblock"+n+".blocks.deconv"+n)
              print(k1)
+        elif "conv" in k and not "upblock" in k: # upsample layer 
+             split = k.split('.')
+             n = split[1].replace('conv','')
+             k1 = k.replace("conv"+n, "upblock"+n+".blocks.conv"+n)
+             print(k1)
+
         Gpar[k1] = Gpar_[k]
     try:
       netG.load_state_dict(Gpar, strict = not opt.nostrict)
     except RuntimeError:
       print("Layer size mismatch during loading")
-      
+
+    if opt.cuda:
+        netG.cuda() 
+
+    if 'G' in opt.dlr: 
+        highlrG = []
+        lowlrG = []
+        newPar = netG.state_dict()
+        for k in newPar.keys():
+           if k not in Gpar:
+               highlrG.append(k)
+               #print(k, newPar[k].shape, "not in loaded file")
+           else:
+               lowlrG.append(k) 
+
+        print("G using high LR for ", highlrG) 
+        print("G using low LR for ", lowlrG) 
+ 
+        hGmod = []
+        lGmod = []
+        for k, m in netG.named_modules():
+            print(k)
+            k_ = k + ".weight"
+            if k_ in highlrG:
+                hGmod.append(m) #.parameters())
+            if k_ in lowlrG:
+                lGmod.append(m) #.parameters())
+
+        #print(hGmod)
+        #print(lGmod)
+        #print("------------------------")
+
     if opt.testpth:
         print("netG: comparing present model with loaded pth") 
         newPar = netG.state_dict()
@@ -477,6 +568,7 @@ if opt.orthoD:
         if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
             nn.init.orthogonal(m.weight)        
 
+
 # load prelearned weights if any
 
 if opt.netD != '':
@@ -502,6 +594,37 @@ if opt.netD != '':
       netD.load_state_dict(Dpar, strict = not opt.nostrict)
     except RuntimeError:
       print("Layer size mismatch during loading") 
+
+    if opt.cuda:
+        netD.cuda()
+
+    if 'D' in opt.dlr: 
+        highlrD = []
+        lowlrD = []
+        newPar = netD.state_dict()
+        for k in newPar.keys():
+           if k not in Dpar:
+               highlrD.append(k)
+               #print(k, newPar[k].shape, "not in loaded file")
+           else:
+               lowlrD.append(k) 
+
+        print("D using high LR for ", highlrD) 
+        print("D using low LR for ", lowlrD) 
+
+        hDmod = []
+        lDmod = []
+        for k, m in netD.named_modules():
+            k_ = k + ".weight"
+            if k_ in highlrD:
+                hDmod.append(m) #.parameters())
+            if k_ in lowlrD:
+                lDmod.append(m) #.parameters())
+
+        #print(hDmod)
+        #print(lDmod)
+        #print("---------------------------")
+
     if opt.testpth:
         print("netD: comparing present model with loaded pth") 
         newPar = netD.state_dict()
@@ -639,50 +762,62 @@ noise = torch.FloatTensor(opt.batchSize, nz, 1, 1)
 fixed_noise = torch.FloatTensor(opt.batchSize, nz, 1, 1).normal_(0, 1)
 label = torch.FloatTensor(opt.batchSize)
 
+
+print(opt.cuda)
 if opt.cuda:
-    netD.cuda()
-    netG.cuda()
+    #hGmod.cuda()
+    #lGmod.cuda()
+    #hDmod.cuda()
+    #lDmod().cuda()
+    #netD.cuda()
+    #netG.cuda()
     if not opt.withoutE:
         netE.cuda()
     criterion.cuda()
     criterionL1.cuda()
+    Dcriterion.cuda()
     input_, label = input_.cuda(), label.cuda()
     noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
 
 fixed_noise = Variable(fixed_noise)
 
-    
-if opt.dlr != '' and opt.dlrrange > 0 :
-    if opt.dlrGrev:
-        lrsG = slice(opt.lrG, opt.lrG/opt.dlrrange)
-    else:
-        lrsG = slice(opt.lrG/opt.dlrrange, opt.lrG)
-    if opt.dlrDrev:
-        lrsD = slice(opt.lrD, opt.lrD/opt.dlrrange)     
-    else:        
-        lrsD = slice(opt.lrD/opt.dlrrange, opt.lrD)     
-    
-    paramsG, lr_arrG, _ = discriminative_lr_params(netG, lrsG)
-    paramsD, lr_arrD, _ = discriminative_lr_params(netD, lrsD)
-    
-elif opt.dlr != '':
-    lrsG = slice(opt.lrG)
-    #if opt.dlrGrev: 
-    #     lrsG = lrsG[::-1]
-    lrsD = slice(opt.lrD)     
-    #if opt.dlrDrev: 
-    #     lrsD = lrsD[::-1]
+def get_params(layers):
+        params = []
+        for layer in layers:
+            #print("*",layer)
+            if (hasattr(layer, "requires_grad") and layer.requires_grad):
+                #To implement for custom nn.Parameter()
+                print("Custom nn.Parameter() not supported")
+            if(hasattr(layer, "weight") and hasattr(layer.weight, "requires_grad") and layer.weight.requires_grad):
+                params.append(layer.weight)
+            if (hasattr(layer, "bias") and hasattr(layer.bias, "requires_grad") and layer.bias.requires_grad):
+                params.append(layer.bias)
+        return params
 
-    paramsG, lr_arrG, _ = discriminative_lr_params(netG, lrsG, reverse=opt.dlrGrev)
-    paramsD, lr_arrD, _ = discriminative_lr_params(netD, lrsD, reverse=opt.dlrDrev)
+def dlr_params(hmod, lmod, lr):
+   #print("________>",get_params(hmod))
+   #print("<_______",get_params(lmod))
+   params = [{'params': get_params(hmod), 'lr': lr},
+             {'params': get_params(lmod), 'lr': lr / opt.dlrrange}
+            ]
+   return params  
+    
+if 'G' in opt.dlr:
+    paramsG = dlr_params(hGmod, lGmod, opt.lrG)
+    lr_arrG = [opt.lrG, opt.lrG/opt.dlrrange]
 else:
     paramsG = netG.parameters()
-    paramsD = netD.parameters()
 
 if 'D' in opt.dlr:
-    print("D lr:", lr_arrD)
-if 'G' in opt.dlr:
-    print("G lr:", lr_arrG)
+    paramsD = dlr_params(hDmod, lDmod, opt.lrD)
+    lr_arrD = [opt.lrD, opt.lrD/opt.dlrrange]
+else:
+    paramsD = netD.parameters()
+
+#if 'D' in opt.dlr:
+#    print("D lr:", lr_arrD)
+#if 'G' in opt.dlr:
+#    print("G lr:", lr_arrG)
 
 # setup optimizer
 if opt.cyclr < 0:
@@ -692,10 +827,9 @@ if opt.cyclr < 0:
         optimizerE = optim.Adam(netE.parameters(), lr=opt.lrE, betas=(opt.beta1, 0.999), weight_decay=opt.weight_decay)
 elif opt.dlr != '':
     if 'D' in opt.dlr:
-        #print("D lr:", lr_arrD)
         optimizerD = optim.RMSprop(paramsD, lr=opt.lrD, weight_decay=opt.weight_decay)
-    #else:
-    #    optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
+    else:
+        optimizerD = optim.RMSprop(netD.parameters(), lr=opt.lrD, weight_decay=opt.weight_decay)
     if 'G' in opt.dlr:
         #print("G lr:", lr_arrG)
         optimizerG = optim.RMSprop(paramsG, lr=opt.lrG, weight_decay=opt.weight_decay)
@@ -718,11 +852,11 @@ if opt.cyclr < 0:
         schedulers.append(lr_scheduler.StepLR(optimizerE, step_size=opt.step, gamma=opt.gamma))
 elif opt.dlr != '':
     if 'G' in opt.dlr: 
-        schedulers.append(lr_scheduler.CyclicLR(optimizerG, base_lr=list(lr_arrG/opt.cyclr), max_lr=list(lr_arrG), cycle_momentum=False, gamma=opt.gamma))
+        schedulers.append(lr_scheduler.CyclicLR(optimizerG, base_lr=[lr / opt.cyclr for lr in lr_arrG], max_lr=lr_arrG, cycle_momentum=False, gamma=opt.gamma))
     else:
         schedulers.append(lr_scheduler.CyclicLR(optimizerG, opt.lrGmin, opt.lrG, cycle_momentum=False, gamma=opt.gamma))
     if 'D' in opt.dlr:        
-        schedulers.append(lr_scheduler.CyclicLR(optimizerD, base_lr=list(lr_arrD/opt.cyclr), max_lr=list(lr_arrD), cycle_momentum=False, gamma=opt.gamma))
+        schedulers.append(lr_scheduler.CyclicLR(optimizerD, base_lr=[lr / opt.cyclr for lr in lr_arrD], max_lr=lr_arrD, cycle_momentum=False, gamma=opt.gamma))
     else:
         schedulers.append(lr_scheduler.CyclicLR(optimizerD, opt.lrDmin, opt.lrD, cycle_momentum=False, gamma=opt.gamma))
     if not opt.withoutE:
