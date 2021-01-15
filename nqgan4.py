@@ -508,10 +508,10 @@ if opt.netG != '':
     except RuntimeError:
       print("Layer size mismatch during loading")
 
-    if opt.cuda:
+if opt.cuda:
         netG.cuda() 
 
-    if 'G' in opt.dlr: 
+if 'G' in opt.dlr: 
         highlrG = []
         lowlrG = []
         newPar = netG.state_dict()
@@ -539,15 +539,15 @@ if opt.netG != '':
         #print(lGmod)
         #print("------------------------")
 
-    if opt.testpth:
-        print("netG: comparing present model with loaded pth") 
-        newPar = netG.state_dict()
-        for k in newPar.keys():
-           if k in Gpar:
+        if opt.testpth:
+          print("netG: comparing present model with loaded pth") 
+          newPar = netG.state_dict()
+          for k in newPar.keys():
+            if k in Gpar:
                 print(k, newPar[k].shape, Gpar[k].shape)
-           else:             
+            else:             
                 print(k, newPar[k].shape, "not in loaded file")
-        for k in Gpar.keys():
+          for k in Gpar.keys():
             if k not in newPar.keys():
                 print(k, Gpar[k].shape, "not in new model")
 
@@ -595,10 +595,10 @@ if opt.netD != '':
     except RuntimeError:
       print("Layer size mismatch during loading") 
 
-    if opt.cuda:
+if opt.cuda:
         netD.cuda()
 
-    if 'D' in opt.dlr: 
+if 'D' in opt.dlr: 
         highlrD = []
         lowlrD = []
         newPar = netD.state_dict()
@@ -625,15 +625,15 @@ if opt.netD != '':
         #print(lDmod)
         #print("---------------------------")
 
-    if opt.testpth:
-        print("netD: comparing present model with loaded pth") 
-        newPar = netD.state_dict()
-        for k in newPar.keys():
-           if k in Dpar:
+        if opt.testpth:
+          print("netD: comparing present model with loaded pth") 
+          newPar = netD.state_dict()
+          for k in newPar.keys():
+            if k in Dpar:
                 print(k, newPar[k].shape, Dpar[k].shape)
-           else:             
+            else:             
                 print(k, newPar[k].shape, "not in loaded file")
-        for k in Dpar.keys():
+          for k in Dpar.keys():
             if k not in newPar.keys():
                 print(k, Dpar[k].shape, "not in new model")
 
