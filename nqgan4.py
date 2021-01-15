@@ -18,7 +18,7 @@ from torch.optim import lr_scheduler
 import numpy as np
 import cv2
 #import torch.nn.functional as F
-from DiscriminativeLRt import discriminative_lr_params
+#from DiscriminativeLRt import discriminative_lr_params
 from FocalLoss import WeightedFocalLoss 
 from image_pool import ImagePool
 
