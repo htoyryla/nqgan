@@ -2,6 +2,14 @@
 
 A versatile GAN supporting many different options.
 
+**NOTE: This repository is made public as a media archeological record only. I started developing nqgan in Spring 2018 for my artistic work and it gradually grew into a monster with a huge number of options.
+The code has evolved for the purposes of my personal artistic work, and there has never been any attempt to clean up the code or refactor it. So be prepared to find it a mess. Also, it may not function
+correctly from theoretical point of view. It never mattered much to me. Whatever has produced artistically useful results has been ok for me. Nevertheless, a few other media artists have managed to use this
+succesfully and produce works of art succesfully**
+
+**There will absolutely not be any further develepoment or maintenance here!!!!**
+
+
 ## Installation
 
 Basic requirements: python >=3.6, pytorch >= 0.41, opencv >= 3.0
