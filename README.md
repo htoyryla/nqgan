@@ -2,7 +2,7 @@
 
 A versatile GAN supporting many different options.
 
-**NOTE: This repository is made public as a media archeological record only. I started developing nqgan in Spring 2018 for my artistic work and it gradually grew into a monster with a huge number of options.
+**NOTE: This repository is made public as a media archeological record only. I started developing nqgan in Spring 2018 for my artistic work and it gradually grew into a monster with a huge number of options. It was my primary artistic tool until the end of 2020.
 The code has evolved for the purposes of my personal artistic work, and there has never been any attempt to clean up the code or refactor it. So be prepared to find it a mess. Also, it may not function
 correctly from theoretical point of view. It never mattered much to me. Whatever has produced artistically useful results has been ok for me. Nevertheless, a few other media artists have managed to use this
 succesfully and produce works of art succesfully**
